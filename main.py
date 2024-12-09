@@ -41,6 +41,8 @@ def calculate_indicators(data):
     data['RSI'] = talib.RSI(data['close'], timeperiod=14)
     data['MACD'], data['MACD_signal'], _ = talib.MACD(data['close'], fastperiod=12, slowperiod=26, signalperiod=9)
     data['ADX'] = talib.ADX(data['high'], data['low'], data['close'], timeperiod=14)
+    data['ATR'] = talib.ATR(data['high'], data['low'], data['close'], timeperiod=14)
+    data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
     return data
 
 def find_swing_points(data, lookback=3):
@@ -145,6 +147,12 @@ def evaluate_signals(data):
         # Bullish patterns
         if data['Pattern'][i] == 'Double Bottom':
             signals.append('Bullish pattern: Double Bottom')
+
+        # Volume and ATR/Bollinger Bands validation
+        if data['volume'][i] > data['volume'][i-1] and data['ATR'][i] > data['ATR'][i-1]:
+            signals.append('High volume and ATR increase')
+        if data['close'][i] > data['BB_upper'][i]:
+            signals.append('Price above Bollinger Bands upper band')
 
         # Aggregate signals into a decision
         if signals:
