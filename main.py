@@ -55,9 +55,9 @@ def find_swing_points(data, lookback=3):
 def detect_breakouts(data):
     data['Breakout'] = 'No'
     for i in range(1, len(data)):
-        if not pd.isna(data['Swing_High'][i-1]) and data['close'][i] > data['Swing_High'][i-1]:
+        if not pd.isna(data['Swing_High'][i-1]) and data['close'][i] > data['Swing_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
             data.loc[i, 'Breakout'] = 'Above'
-        elif not pd.isna(data['Swing_Low'][i-1]) and data['close'][i] < data['Swing_Low'][i-1]:
+        elif not pd.isna(data['Swing_Low'][i-1]) and data['close'][i] < data['Swing_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
             data.loc[i, 'Breakout'] = 'Below'
     return data
 
@@ -84,9 +84,9 @@ def calculate_trendlines(data):
 def detect_trendline_breakouts(data):
     data['Trendline_Breakout'] = 'No'
     for i in range(1, len(data)):
-        if not pd.isna(data['Trendline_High'][i-1]) and data['close'][i] > data['Trendline_High'][i-1]:
+        if not pd.isna(data['Trendline_High'][i-1]) and data['close'][i] > data['Trendline_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
             data.loc[i, 'Trendline_Breakout'] = 'Above'
-        elif not pd.isna(data['Trendline_Low'][i-1]) and data['close'][i] < data['Trendline_Low'][i-1]:
+        elif not pd.isna(data['Trendline_Low'][i-1]) and data['close'][i] < data['Trendline_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
             data.loc[i, 'Trendline_Breakout'] = 'Below'
     return data
 
@@ -100,8 +100,6 @@ def detect_chart_patterns(data):
         if i > 5 and data['close'][i] > data['close'][i-1] and data['close'][i-1] < data['close'][i-2] and data['close'][i-2] > data['close'][i-3] and data['close'][i-3] < data['close'][i-4] and data['close'][i-4] > data['close'][i-5]:
             data.loc[i, 'Pattern'] = 'Double Bottom'
     return data
-
-from matplotlib.dates import DateFormatter, AutoDateLocator
 
 def plot_trend(data):
     if data.empty:
@@ -162,7 +160,7 @@ def main():
     
     # Print the latest data with indicators
     latest_data = data.tail()
-    print(latest_data[['timestamp', 'close', 'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200', 'RSI', 'MACD', 'MACD_signal', 'ADX', 'Swing_High', 'Swing_Low', 'Breakout', 'Trendline_High', 'Trendline_Low', 'Trendline_Breakout', 'Pattern']])
+    print(latest_data[['close', 'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200', 'RSI', 'MACD', 'MACD_signal', 'ADX', 'Swing_High', 'Swing_Low', 'Breakout', 'Trendline_High', 'Trendline_Low', 'Trendline_Breakout', 'Pattern']])
 
     # Plot the trend
     plot_trend(data)
