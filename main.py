@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import talib
 from scipy.stats import linregress
 from matplotlib.dates import DateFormatter, AutoDateLocator
+from score import *
 
 # Set display options to show all columns and rows
 pd.set_option('display.max_columns', None)
@@ -186,65 +187,58 @@ def detect_chart_patterns(data):
                 
     return data
 
+def print_signal_analysis(data):
+    # Filter for meaningful signals
+    significant_signals = data[data['Score'] > 3].copy()
+    
+    if len(significant_signals) == 0:
+        print("No significant trading signals found")
+        return
+        
+    print("\n=== Trading Signal Analysis ===")
+    print(f"Total signals analyzed: {len(data)}")
+    print(f"Significant signals found: {len(significant_signals)}")
+    print("\nTop Signals:")
+    print("-" * 80)
+    
+    # Sort by score descending
+    sorted_signals = significant_signals.sort_values('Score', ascending=False)
+    
+    for idx, row in sorted_signals.head(5).iterrows():
+        print(f"\nDate: {row['timestamp']}")
+        print(f"Score: {row['Score']:.2f}")
+        print(f"Confidence: {row['Confidence']:.1f}%")
+        print(f"Decision: {row['Decision']}")
+        print(f"Close Price: {row['close']}")
+        print(f"Reasoning: {row['Reasoning']}")
+        print("-" * 80)
+
+
+# Modify evaluate_signals to include the print
 def evaluate_signals(data):
-    data['Signals'] = ''
+    scorer = SignalScore()
+    data['Score'] = 0.0
+    data['Confidence'] = 0.0
     data['Decision'] = 'Neutral'
     data['Reasoning'] = ''
-
+    
     for i in range(1, len(data)):
-        signals = []
-        reasoning = []
-
-        # Price crosses above key moving averages
-        if data['close'][i] > data['SMA_50'][i]:
-            signals.append('Price above SMA_50')
-        if data['close'][i] > data['EMA_50'][i]:
-            signals.append('Price above EMA_50')
-
-        # RSI within bullish range
-        if 30 < data['RSI'][i] < 70:
-            signals.append('RSI in bullish range')
-
-        # MACD bullish crossover
-        if data['MACD'][i] > data['MACD_signal'][i]:
-            signals.append('MACD bullish crossover')
-
-        # Positive breakouts
-        if data['Breakout'][i] == 'Above':
-            signals.append('Positive breakout above swing high')
-        if data['Trendline_Breakout'][i] == 'Above':
-            signals.append('Positive breakout above trendline')
-
-        # ADX indicates strong trend
-        if data['ADX'][i] > 25:
-            signals.append('ADX indicates strong trend')
-
-   
-        # Enhanced pattern recognition signals
-        if data['Pattern'][i] in ['Inverse Head and Shoulders', 'Double Bottom', 'Triple Bottom', 'Bull Flag', 'Cup and Handle']:
-            signals.append(f'Bullish pattern: {data["Pattern"][i]}')
-        elif data['Pattern'][i] in ['Head and Shoulders', 'Double Top', 'Triple Top', 'Bear Flag']:
-            signals.append(f'Bearish pattern: {data["Pattern"][i]}')
-        elif data['Pattern'][i] == 'Rectangle':
-            if data['close'][i] > data['close'][i-1]:
-                signals.append('Breaking out of Rectangle pattern')
-
-
-        # Volume and ATR/Bollinger Bands validation
-        if data['volume'][i] > data['volume'][i-1] and data['ATR'][i] > data['ATR'][i-1]:
-            signals.append('High volume and ATR increase')
-        if data['close'][i] > data['BB_upper'][i]:
-            signals.append('Price above Bollinger Bands upper band')
-
-        # Aggregate signals into a decision
-        if signals:
-            data.at[i, 'Signals'] = ', '.join(signals)
-            data.at[i, 'Decision'] = 'Long'
-            reasoning.append(' and '.join(signals))
-            data.at[i, 'Reasoning'] = 'Long signal due to: ' + '; '.join(reasoning)
-        else:
-            data.at[i, 'Reasoning'] = 'No significant signals detected'
-
+        score, confidence, reasons = scorer.calculate_score(data, data, i)
+        
+        data.loc[i, 'Score'] = score
+        data.loc[i, 'Confidence'] = confidence
+        
+        if score > 10 and confidence > 60:
+            data.loc[i, 'Decision'] = 'Strong Long'
+        elif score > 7 and confidence > 40:
+            data.loc[i, 'Decision'] = 'Long'
+        elif score < 3:
+            data.loc[i, 'Decision'] = 'Neutral'
+            
+        data.loc[i, 'Reasoning'] = ' | '.join(reasons)
+    
+    # Print analysis after processing
+    print_signal_analysis(data)
     return data
 
 def plot_trend(data):
@@ -308,7 +302,7 @@ def main():
     data = detect_trendline_breakouts(data)
     data = detect_chart_patterns(data)
     data = evaluate_signals(data)
-    
+        
     # Save the latest data with indicators to a CSV file
     latest_data = data.tail()
     latest_data.to_csv('latest_data_analysis.csv', index=False)
