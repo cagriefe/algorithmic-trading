@@ -8,6 +8,12 @@ import talib
 from scipy.stats import linregress
 from matplotlib.dates import DateFormatter, AutoDateLocator
 
+# Set display options to show all columns and rows
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -55,10 +61,11 @@ def find_swing_points(data, lookback=3):
 def detect_breakouts(data):
     data['Breakout'] = 'No'
     for i in range(1, len(data)):
-        if not pd.isna(data['Swing_High'][i-1]) and data['close'][i] > data['Swing_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
-            data.loc[i, 'Breakout'] = 'Above'
-        elif not pd.isna(data['Swing_Low'][i-1]) and data['close'][i] < data['Swing_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
-            data.loc[i, 'Breakout'] = 'Below'
+        if data['ADX'][i] > 25:  # Only consider breakouts in trending markets
+            if not pd.isna(data['Swing_High'][i-1]) and data['close'][i] > data['Swing_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
+                data.loc[i, 'Breakout'] = 'Above'
+            elif not pd.isna(data['Swing_Low'][i-1]) and data['close'][i] < data['Swing_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
+                data.loc[i, 'Breakout'] = 'Below'
     return data
 
 def calculate_trendlines(data):
@@ -84,10 +91,11 @@ def calculate_trendlines(data):
 def detect_trendline_breakouts(data):
     data['Trendline_Breakout'] = 'No'
     for i in range(1, len(data)):
-        if not pd.isna(data['Trendline_High'][i-1]) and data['close'][i] > data['Trendline_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
-            data.loc[i, 'Trendline_Breakout'] = 'Above'
-        elif not pd.isna(data['Trendline_Low'][i-1]) and data['close'][i] < data['Trendline_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
-            data.loc[i, 'Trendline_Breakout'] = 'Below'
+        if data['ADX'][i] > 25:  # Only consider trendline breakouts in trending markets
+            if not pd.isna(data['Trendline_High'][i-1]) and data['close'][i] > data['Trendline_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
+                data.loc[i, 'Trendline_Breakout'] = 'Above'
+            elif not pd.isna(data['Trendline_Low'][i-1]) and data['close'][i] < data['Trendline_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
+                data.loc[i, 'Trendline_Breakout'] = 'Below'
     return data
 
 def detect_chart_patterns(data):
@@ -160,7 +168,7 @@ def main():
     
     # Print the latest data with indicators
     latest_data = data.tail()
-    print(latest_data[['close', 'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200', 'RSI', 'MACD', 'MACD_signal', 'ADX', 'Swing_High', 'Swing_Low', 'Breakout', 'Trendline_High', 'Trendline_Low', 'Trendline_Breakout', 'Pattern']])
+    print(latest_data[['timestamp','close', 'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200', 'RSI', 'MACD', 'MACD_signal', 'ADX', 'Swing_High', 'Swing_Low', 'Breakout', 'Trendline_High', 'Trendline_Low', 'Trendline_Breakout', 'Pattern']])
 
     # Plot the trend
     plot_trend(data)
