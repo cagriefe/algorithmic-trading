@@ -322,8 +322,7 @@ def plot_trend(data):
     # Layout
     plt.tight_layout()
     
-    # Save plot
-    plt.savefig('technical_analysis.png', dpi=300, bbox_inches='tight')
+    # plt.savefig('technical_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 def main():
