@@ -109,6 +109,54 @@ def detect_chart_patterns(data):
             data.loc[i, 'Pattern'] = 'Double Bottom'
     return data
 
+def evaluate_signals(data):
+    data['Signals'] = ''
+    data['Decision'] = 'Neutral'
+    data['Reasoning'] = ''
+
+    for i in range(1, len(data)):
+        signals = []
+        reasoning = []
+
+        # Price crosses above key moving averages
+        if data['close'][i] > data['SMA_50'][i]:
+            signals.append('Price above SMA_50')
+        if data['close'][i] > data['EMA_50'][i]:
+            signals.append('Price above EMA_50')
+
+        # RSI within bullish range
+        if 30 < data['RSI'][i] < 70:
+            signals.append('RSI in bullish range')
+
+        # MACD bullish crossover
+        if data['MACD'][i] > data['MACD_signal'][i]:
+            signals.append('MACD bullish crossover')
+
+        # Positive breakouts
+        if data['Breakout'][i] == 'Above':
+            signals.append('Positive breakout above swing high')
+        if data['Trendline_Breakout'][i] == 'Above':
+            signals.append('Positive breakout above trendline')
+
+        # ADX indicates strong trend
+        if data['ADX'][i] > 25:
+            signals.append('ADX indicates strong trend')
+
+        # Bullish patterns
+        if data['Pattern'][i] == 'Double Bottom':
+            signals.append('Bullish pattern: Double Bottom')
+
+        # Aggregate signals into a decision
+        if signals:
+            data.at[i, 'Signals'] = ', '.join(signals)
+            data.at[i, 'Decision'] = 'Long'
+            reasoning.append(' and '.join(signals))
+            data.at[i, 'Reasoning'] = 'Long signal due to: ' + '; '.join(reasoning)
+        else:
+            data.at[i, 'Reasoning'] = 'No significant signals detected'
+
+    return data
+
 def plot_trend(data):
     if data.empty:
         print("No data to plot.")
@@ -139,6 +187,10 @@ def plot_trend(data):
     plt.scatter(trendline_breakout_above.index, trendline_breakout_above['close'], color='cyan', label='Trendline Breakout Above', marker='x')
     plt.scatter(trendline_breakout_below.index, trendline_breakout_below['close'], color='magenta', label='Trendline Breakout Below', marker='x')
 
+    # Highlight long signals
+    long_signals = data[data['Decision'] == 'Long']
+    plt.scatter(long_signals.index, long_signals['close'], color='gold', label='Long Signal', marker='*', s=100)
+
     # X-Axis formatting
     plt.gca().xaxis.set_major_locator(AutoDateLocator())  # Automatic date tick spacing
     plt.gca().xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))  # Format: YYYY-MM-DD
@@ -165,10 +217,11 @@ def main():
     data = calculate_trendlines(data)
     data = detect_trendline_breakouts(data)
     data = detect_chart_patterns(data)
+    data = evaluate_signals(data)
     
-    # Print the latest data with indicators
+    # Save the latest data with indicators to a CSV file
     latest_data = data.tail()
-    print(latest_data[['timestamp','close', 'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200', 'RSI', 'MACD', 'MACD_signal', 'ADX', 'Swing_High', 'Swing_Low', 'Breakout', 'Trendline_High', 'Trendline_Low', 'Trendline_Breakout', 'Pattern']])
+    latest_data.to_csv('latest_data_analysis.csv', index=False)
 
     # Plot the trend
     plot_trend(data)
