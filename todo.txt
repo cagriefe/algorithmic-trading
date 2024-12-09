@@ -1,0 +1,11 @@
++ Price Action Analysis: This example does not yet include swing highs/lows or breakout confirmation.
++ Moving Averages: Includes SMA and EMA calculations.
++ Momentum Indicators: Includes RSI, MACD, and ADX calculations.
++ Trendlines: Not included in this example.
+Chart Patterns: Not included in this example.
+Volume Analysis: Not included in this example.
+Stop Loss and Risk Management: Not included in this example.
+Market Conditions and Timeframes: Not included in this example.
+Combine Multiple Signals: Not included in this example.
+Backtesting and Optimization: Not included in this example.
+Automation and Real-Time Updates: Uses Binance API for real-time data.
