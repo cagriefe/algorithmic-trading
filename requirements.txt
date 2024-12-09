@@ -1,0 +1,13 @@
+numpy
+pandas
+scipy
+matplotlib
+scikit-learn
+statsmodels
+yfinance
+requests
+beautifulsoup4
+lxml
+ta-lib
+python-binance
+python-dotenv

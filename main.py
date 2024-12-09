@@ -102,13 +102,88 @@ def detect_trendline_breakouts(data):
 
 def detect_chart_patterns(data):
     data['Pattern'] = 'None'
-    for i in range(1, len(data)):
-        # Example: Detecting Double Top pattern
-        if i > 5 and data['close'][i] < data['close'][i-1] and data['close'][i-1] > data['close'][i-2] and data['close'][i-2] < data['close'][i-3] and data['close'][i-3] > data['close'][i-4] and data['close'][i-4] < data['close'][i-5]:
-            data.loc[i, 'Pattern'] = 'Double Top'
-        # Example: Detecting Double Bottom pattern
-        if i > 5 and data['close'][i] > data['close'][i-1] and data['close'][i-1] < data['close'][i-2] and data['close'][i-2] > data['close'][i-3] and data['close'][i-3] < data['close'][i-4] and data['close'][i-4] > data['close'][i-5]:
-            data.loc[i, 'Pattern'] = 'Double Bottom'
+    window = 20  # Pattern detection window
+    
+    for i in range(window, len(data)):
+        window_data = data.iloc[i-window:i+1]
+        
+        # Head and Shoulders
+        if i > window + 10:
+            left_shoulder = max(data['high'][i-window:i-window//2])
+            head = max(data['high'][i-window//2:i-5])
+            right_shoulder = max(data['high'][i-5:i])
+            neckline = min(data['low'][i-window:i])
+            
+            if (left_shoulder < head and right_shoulder < head and 
+                abs(left_shoulder - right_shoulder)/left_shoulder < 0.02):
+                data.loc[i, 'Pattern'] = 'Head and Shoulders'
+        
+        # Inverse Head and Shoulders
+        if i > window + 10:
+            left_valley = min(data['low'][i-window:i-window//2])
+            head_valley = min(data['low'][i-window//2:i-5])
+            right_valley = min(data['low'][i-5:i])
+            neckline = max(data['high'][i-window:i])
+            
+            if (left_valley > head_valley and right_valley > head_valley and 
+                abs(left_valley - right_valley)/left_valley < 0.02):
+                data.loc[i, 'Pattern'] = 'Inverse Head and Shoulders'
+        
+        # Double Top
+        if i > 5:
+            if (data['high'][i-1] > data['high'][i] and 
+                abs(data['high'][i-1] - data['high'][i-3])/data['high'][i-1] < 0.02 and
+                data['high'][i-2] < data['high'][i-1]):
+                data.loc[i, 'Pattern'] = 'Double Top'
+        
+        # Double Bottom
+        if i > 5:
+            if (data['low'][i-1] < data['low'][i] and 
+                abs(data['low'][i-1] - data['low'][i-3])/data['low'][i-1] < 0.02 and
+                data['low'][i-2] > data['low'][i-1]):
+                data.loc[i, 'Pattern'] = 'Double Bottom'
+        
+        # Triple Top
+        if i > 10:
+            tops = [data['high'][i-j] for j in range(1, 7)]
+            if (len(set(round(x, 2) for x in tops[:3])) == 1 and
+                all(x < max(tops[:3]) for x in tops[3:])):
+                data.loc[i, 'Pattern'] = 'Triple Top'
+        
+        # Triple Bottom
+        if i > 10:
+            bottoms = [data['low'][i-j] for j in range(1, 7)]
+            if (len(set(round(x, 2) for x in bottoms[:3])) == 1 and
+                all(x > min(bottoms[:3]) for x in bottoms[3:])):
+                data.loc[i, 'Pattern'] = 'Triple Bottom'
+        
+        # Bull Flag
+        if i > window:
+            if (data['close'][i-window:i].is_monotonic_increasing and
+                data['high'][i-5:i].is_monotonic_decreasing):
+                data.loc[i, 'Pattern'] = 'Bull Flag'
+        
+        # Bear Flag
+        if i > window:
+            if (data['close'][i-window:i].is_monotonic_decreasing and
+                data['low'][i-5:i].is_monotonic_increasing):
+                data.loc[i, 'Pattern'] = 'Bear Flag'
+        
+        # Rectangle (Trading Range)
+        if i > window:
+            price_range = data['high'][i-window:i] - data['low'][i-window:i]
+            if price_range.std() < price_range.mean() * 0.1:
+                data.loc[i, 'Pattern'] = 'Rectangle'
+        
+        # Cup and Handle
+        if i > window + 10:
+            cup_section = data['close'][i-window:i-5]
+            handle_section = data['close'][i-5:i]
+            if (cup_section.is_monotonic_decreasing and 
+                handle_section.is_monotonic_increasing and
+                min(cup_section) > min(handle_section)):
+                data.loc[i, 'Pattern'] = 'Cup and Handle'
+                
     return data
 
 def evaluate_signals(data):
@@ -144,9 +219,16 @@ def evaluate_signals(data):
         if data['ADX'][i] > 25:
             signals.append('ADX indicates strong trend')
 
-        # Bullish patterns
-        if data['Pattern'][i] == 'Double Bottom':
-            signals.append('Bullish pattern: Double Bottom')
+   
+        # Enhanced pattern recognition signals
+        if data['Pattern'][i] in ['Inverse Head and Shoulders', 'Double Bottom', 'Triple Bottom', 'Bull Flag', 'Cup and Handle']:
+            signals.append(f'Bullish pattern: {data["Pattern"][i]}')
+        elif data['Pattern'][i] in ['Head and Shoulders', 'Double Top', 'Triple Top', 'Bear Flag']:
+            signals.append(f'Bearish pattern: {data["Pattern"][i]}')
+        elif data['Pattern'][i] == 'Rectangle':
+            if data['close'][i] > data['close'][i-1]:
+                signals.append('Breaking out of Rectangle pattern')
+
 
         # Volume and ATR/Bollinger Bands validation
         if data['volume'][i] > data['volume'][i-1] and data['ATR'][i] > data['ATR'][i-1]:
