@@ -196,15 +196,28 @@ def print_signal_analysis(data):
         return
         
     print("\n=== Trading Signal Analysis ===")
-    print(f"Total signals analyzed: {len(data)}")
-    print(f"Significant signals found: {len(significant_signals)}")
-    print("\nTop Signals:")
+    
+    # Print latest/current signal first
+    latest = data.iloc[-1]
+    print("\nCURRENT SIGNAL:")
+    print("-" * 80)
+    print(f"Date: {latest['timestamp']}")
+    print(f"Score: {latest['Score']:.2f}")
+    print(f"Confidence: {latest['Confidence']:.1f}%")
+    print(f"Decision: {latest['Decision']}")
+    print(f"Close Price: {latest['close']}")
+    print(f"Reasoning: {latest['Reasoning']}")
     print("-" * 80)
     
-    # Sort by score descending
+    print("\nHISTORICAL BEST SIGNALS:")
+    print(f"Total signals analyzed: {len(data)}")
+    print(f"Significant signals found: {len(significant_signals)}")
+    print("-" * 80)
+    
+    # Sort by score descending for historical best
     sorted_signals = significant_signals.sort_values('Score', ascending=False)
     
-    for idx, row in sorted_signals.head(5).iterrows():
+    for idx, row in sorted_signals.head(3).iterrows():
         print(f"\nDate: {row['timestamp']}")
         print(f"Score: {row['Score']:.2f}")
         print(f"Confidence: {row['Confidence']:.1f}%")
@@ -246,51 +259,75 @@ def plot_trend(data):
         print("No data to plot.")
         return
 
-    # Convert timestamps to datetime and set as index for better x-axis handling
+    # Create figure and subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12), gridspec_kw={'height_ratios': [3, 1]})
     data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
     data.set_index('timestamp', inplace=True)
+    # Main price plot
+    ax1.plot(data.index, data['close'], label='Close Price', color='blue', alpha=0.7)
+    ax1.plot(data.index, data['SMA_50'], label='SMA 50', color='orange', linestyle='--', alpha=0.7)
+    ax1.plot(data.index, data['SMA_200'], label='SMA 200', color='purple', linestyle='--', alpha=0.7)
+    
+    # Plot Bollinger Bands
+    ax1.plot(data.index, data['BB_upper'], 'k--', alpha=0.3)
+    ax1.plot(data.index, data['BB_middle'], 'k--', alpha=0.3)
+    ax1.plot(data.index, data['BB_lower'], 'k--', alpha=0.3)
+    ax1.fill_between(data.index, data['BB_upper'], data['BB_lower'], alpha=0.1, color='gray', label='Bollinger Bands')
 
-    plt.figure(figsize=(14, 7))
-    plt.plot(data.index, data['close'], label='Close Price', color='blue', alpha=0.7)
-    plt.plot(data.index, data['SMA_50'], label='SMA 50', color='orange', linestyle='--', alpha=0.7)
-    plt.plot(data.index, data['SMA_200'], label='SMA 200', color='purple', linestyle='--', alpha=0.7)
-    plt.scatter(data.index, data['Swing_High'], color='green', label='Swing High', marker='^', alpha=0.9)
-    plt.scatter(data.index, data['Swing_Low'], color='red', label='Swing Low', marker='v', alpha=0.9)
-    plt.plot(data.index, data['Trendline_High'], label='Trendline High', color='darkgreen', linestyle='-.', alpha=0.7)
-    plt.plot(data.index, data['Trendline_Low'], label='Trendline Low', color='darkred', linestyle='-.', alpha=0.7)
+    # Swing points and trendlines
+    ax1.scatter(data.index, data['Swing_High'], color='green', label='Swing High', marker='^', alpha=0.9)
+    ax1.scatter(data.index, data['Swing_Low'], color='red', label='Swing Low', marker='v', alpha=0.9)
+    ax1.plot(data.index, data['Trendline_High'], label='Trendline High', color='darkgreen', linestyle='-.', alpha=0.7)
+    ax1.plot(data.index, data['Trendline_Low'], label='Trendline Low', color='darkred', linestyle='-.', alpha=0.7)
 
-    # Highlight breakouts
+    # Breakouts
     breakout_above = data[data['Breakout'] == 'Above']
     breakout_below = data[data['Breakout'] == 'Below']
-    plt.scatter(breakout_above.index, breakout_above['close'], color='lime', label='Breakout Above', marker='o')
-    plt.scatter(breakout_below.index, breakout_below['close'], color='darkred', label='Breakout Below', marker='o')
+    ax1.scatter(breakout_above.index, breakout_above['close'], color='lime', label='Breakout Above', marker='o')
+    ax1.scatter(breakout_below.index, breakout_below['close'], color='darkred', label='Breakout Below', marker='o')
 
-    # Highlight trendline breakouts
+    # Trendline breakouts
     trendline_breakout_above = data[data['Trendline_Breakout'] == 'Above']
     trendline_breakout_below = data[data['Trendline_Breakout'] == 'Below']
-    plt.scatter(trendline_breakout_above.index, trendline_breakout_above['close'], color='cyan', label='Trendline Breakout Above', marker='x')
-    plt.scatter(trendline_breakout_below.index, trendline_breakout_below['close'], color='magenta', label='Trendline Breakout Below', marker='x')
+    ax1.scatter(trendline_breakout_above.index, trendline_breakout_above['close'], color='cyan', label='Trendline Breakout Above', marker='x')
+    ax1.scatter(trendline_breakout_below.index, trendline_breakout_below['close'], color='magenta', label='Trendline Breakout Below', marker='x')
 
-    # Highlight long signals
+    # Trading signals
     long_signals = data[data['Decision'] == 'Long']
-    plt.scatter(long_signals.index, long_signals['close'], color='gold', label='Long Signal', marker='*', s=100)
+    strong_long_signals = data[data['Decision'] == 'Strong Long']
+    ax1.scatter(long_signals.index, long_signals['close'], color='gold', label='Long Signal', marker='*', s=100)
+    ax1.scatter(strong_long_signals.index, strong_long_signals['close'], color='green', label='Strong Long Signal', marker='*', s=150)
 
-    # X-Axis formatting
-    plt.gca().xaxis.set_major_locator(AutoDateLocator())  # Automatic date tick spacing
-    plt.gca().xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))  # Format: YYYY-MM-DD
-    plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
+    # Volume subplot
+    ax2.bar(data.index, data['volume'], color='blue', alpha=0.3, label='Volume')
+    
+    # Format axes
+    for ax in [ax1, ax2]:
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(AutoDateLocator())
+        ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+        
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
-    # Chart details
-    plt.legend()
-    plt.title('Swing Highs, Lows, Breakouts, and Indicators')
-    plt.xlabel('Time')
-    plt.ylabel('Price')
-    plt.grid(alpha=0.3)
-    plt.tight_layout()  # Prevent label cutoff
+    # Titles and labels
+    ax1.set_title('Technical Analysis Overview', pad=20)
+    ax1.set_ylabel('Price')
+    ax2.set_ylabel('Volume')
+    ax2.set_xlabel('Date')
+    
+    # Legend
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Layout
+    plt.tight_layout()
+    
+    # Save plot
+    plt.savefig('technical_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 def main():
-    symbol = 'ETHUSDT'
+    symbol = 'APEUSDT'
     interval = Client.KLINE_INTERVAL_1DAY
     start_str = '1 year ago UTC'
 
@@ -302,13 +339,17 @@ def main():
     data = detect_trendline_breakouts(data)
     data = detect_chart_patterns(data)
     data = evaluate_signals(data)
+    
+    # Print analysis with current and historical signals
+    print_signal_analysis(data)
         
     # Save the latest data with indicators to a CSV file
     latest_data = data.tail()
-    latest_data.to_csv('latest_data_analysis.csv', index=False)
-
-    # Plot the trend
+    latest_data.to_csv('latest_data_analysis.csv')
+    
+    # Generate plot
     plot_trend(data)
+    print_signal_analysis(data)
 
 if __name__ == "__main__":
     main()
