@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: trading_app
+    environment:
+      - API_KEY=${API_KEY}
+      - API_SECRET=${API_SECRET}
+    volumes:
+      - .:/app
+    ports:
+      - "5000:80"
+    command: python main.py

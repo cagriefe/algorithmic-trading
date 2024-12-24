@@ -348,7 +348,6 @@ def main():
     
     # Generate plot
     plot_trend(data)
-    print_signal_analysis(data)
 
 if __name__ == "__main__":
     main()
