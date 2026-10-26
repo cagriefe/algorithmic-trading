@@ -95,6 +95,34 @@ def print_scan_report(summary, errors):
         print(f'Skipped {symbol}: {error}')
 
 
+def _summary_line(label, metrics):
+    print(f'{label:<42}return {metrics["Total return %"]:+7.2f}%   max DD {metrics["Max drawdown %"]:7.2f}%   '
+          f'Sharpe {_format_metric(metrics["Sharpe ratio"])}')
+
+
+def print_walk_forward_report(result):
+    print(f'\n=== Walk-Forward Optimisation ({len(result.folds)} folds, objective: {result.objective}) ===')
+    print('Each fold picks the best parameters on all earlier data and then trades the next, unseen period.\n')
+    print(result.folds.to_string(index=False, float_format=lambda x: f'{x:.2f}', na_rep='-'))
+    print()
+    _summary_line('Out-of-sample, re-optimised every fold:', result.oos_metrics)
+    _summary_line('Default parameters, same periods:', result.baseline_metrics)
+    buy_and_hold = (result.buy_and_hold_equity.iloc[-1] / result.buy_and_hold_equity.iloc[0] - 1) * 100
+    print(f'{"Buy & hold, same periods:":<42}return {buy_and_hold:+7.2f}%')
+    print(f'Out-of-sample trades: {result.oos_metrics["Trades"]}')
+    if np.isfinite(result.efficiency):
+        print(f'Walk-forward efficiency: {result.efficiency:.0f}% of the in-sample return per bar was kept '
+              'out of sample (above ~50% suggests more than curve fitting)')
+    else:
+        print('Walk-forward efficiency: n/a (the in-sample results were not profitable)')
+
+    params = result.recommended
+    print(f'\nBest on the full history (in-sample, validate before trusting): stop {params["stop_loss_atr"]:g} ATR, '
+          f'target {params["take_profit_atr"]:g} ATR, entry on {params["entry"]}, ADX > {params["adx_threshold"]:g}')
+    print('\nTop 5 parameter sets on the full history:')
+    print(result.grid.head(5).to_string(index=False, float_format=lambda x: f'{x:.2f}', na_rep='-'))
+
+
 def print_edge_report(table):
     print('\n=== Signal Edge (what happened after each signal) ===')
     print(table.to_string(index=False, float_format=lambda x: f'{x:.2f}', na_rep='-'))

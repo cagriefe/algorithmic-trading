@@ -13,9 +13,10 @@ from .data import INTERVALS, create_client, fetch_klines, load_csv
 from .edge import signal_edge
 from .html_report import write_report
 from .montecarlo import monte_carlo
+from .optimize import DEFAULT_GRID, OBJECTIVES, parameter_sets, walk_forward
 from .price_action import ADX_TREND_THRESHOLD, SWING_LOOKBACK
 from .report import (print_backtest_report, print_edge_report, print_monte_carlo, print_scan_report,
-                     print_signal_analysis)
+                     print_signal_analysis, print_walk_forward_report)
 from .scanner import scan_markets, top_symbols
 
 
@@ -95,6 +96,22 @@ def build_parser():
     scan.add_argument('--output-dir', type=Path, default=Path('output'),
                       help='directory for scan.csv and the dashboard (default: %(default)s)')
     scan.add_argument('--html', action='store_true', help='write a dashboard (index.html) and a report per market')
+
+    optimize = commands.add_parser(
+        'optimize', parents=shared, help='walk-forward parameter optimisation',
+        description='Search stop loss, take profit, entry level and ADX threshold on expanding windows and test '
+                    'the winners on the following, unseen periods.')
+    optimize.set_defaults(start='3 years ago UTC')
+    optimize.add_argument('--symbol', default='APEUSDT', help='Binance trading pair (default: %(default)s)')
+    optimize.add_argument('--csv', type=Path, help='load OHLCV data from a CSV file instead of Binance')
+    optimize.add_argument('--folds', type=int, default=4, help='number of out-of-sample test periods (default: %(default)s)')
+    optimize.add_argument('--objective', default='sharpe', choices=OBJECTIVES,
+                          help='what the optimiser maximises (default: %(default)s)')
+    optimize.add_argument('--min-trades', type=int, default=3,
+                          help='minimum trades for a parameter set to be eligible (default: %(default)s)')
+    optimize.add_argument('--output-dir', type=Path, default=Path('output'),
+                          help='directory for the CSV and chart files (default: %(default)s)')
+    optimize.add_argument('--no-plot', action='store_true', help='do not create the PNG chart')
     return parser
 
 
@@ -105,11 +122,8 @@ def backtest_config(args):
         exit_on_breakdown=not args.no_breakdown_exit)
 
 
-def run_analyze(args):
-    if not args.show:
-        import matplotlib
-        matplotlib.use('Agg')
-
+def load_market(args):
+    """OHLCV data from --csv or Binance, plus a file name stem and a title."""
     if args.csv:
         data = load_csv(args.csv)
         name = title = args.csv.stem
@@ -118,7 +132,15 @@ def run_analyze(args):
         name, title = f'{args.symbol}_{args.interval}', f'{args.symbol} ({args.interval})'
     if data.empty:
         raise SystemExit('No market data returned; check the symbol, interval and date range.')
+    return data, name, title
 
+
+def run_analyze(args):
+    if not args.show:
+        import matplotlib
+        matplotlib.use('Agg')
+
+    data, name, title = load_market(args)
     data = run_analysis(data, lookback=args.swing_lookback, adx_threshold=args.adx_threshold)
     print_signal_analysis(data, top=args.top)
     edge = signal_edge(data) if args.edge or args.html else None
@@ -196,7 +218,38 @@ def run_scan(args):
     return 0 if details else 1
 
 
-HANDLERS = {'analyze': run_analyze, 'scan': run_scan}
+def run_optimize(args):
+    data, name, title = load_market(args)
+    print(f'Walk-forward optimisation of {title}: {len(parameter_sets(DEFAULT_GRID))} parameter sets, '
+          f'{args.folds} folds, {len(data)} bars...')
+    try:
+        result = walk_forward(data, backtest_config(args), folds=args.folds, objective=args.objective,
+                              min_trades=args.min_trades, lookback=args.swing_lookback, default_adx=args.adx_threshold)
+    except ValueError as error:
+        raise SystemExit(str(error))
+    print_walk_forward_report(result)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    print()
+    for suffix, table in [('walkforward', result.folds), ('grid', result.grid)]:
+        path = args.output_dir / f'{name}_{suffix}.csv'
+        table.to_csv(path, index=False)
+        print(f'Saved {suffix} results to {path}')
+    if not args.no_plot:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from .plotting import plot_walk_forward
+
+        fig = plot_walk_forward(result, title=f'{title} - walk-forward optimisation ({args.objective})')
+        chart_path = args.output_dir / f'{name}_walkforward.png'
+        fig.savefig(chart_path, dpi=110, bbox_inches='tight')
+        plt.close(fig)
+        print(f'Saved chart to {chart_path}')
+    return 0
+
+
+HANDLERS = {'analyze': run_analyze, 'scan': run_scan, 'optimize': run_optimize}
 
 
 def main(argv=None):
