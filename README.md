@@ -72,13 +72,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Market data is public, so no Binance API keys are needed. If you want to use your own keys, put them in a `.env`
-file:
-
-```
-API_KEY=your_api_key_here
-API_SECRET=your_api_secret_here
-```
+No Binance account or API keys are needed: market data comes from Binance's public endpoints. Where
+`api.binance.com` is geo-restricted (HTTP 451, e.g. US cloud servers), the client automatically switches to the
+public market-data mirror `data-api.binance.vision`.
 
 ## Usage
 

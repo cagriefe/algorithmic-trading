@@ -2,9 +2,6 @@ services:
   app:
     build: .
     container_name: trading_app
-    environment:
-      - API_KEY=${API_KEY:-}
-      - API_SECRET=${API_SECRET:-}
     volumes:
       - ./output:/app/output
     command: ["--symbol", "APEUSDT", "--interval", "1d"]

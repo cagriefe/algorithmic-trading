@@ -1,6 +1,6 @@
 matplotlib>=3.8
 numpy>=1.26
 pandas>=2.2
-python-binance>=1.0.25
 python-dotenv>=1.0
+requests>=2.31
 TA-Lib>=0.6.5
