@@ -114,8 +114,8 @@ def run_backtest(data, config=None):
 
 def compute_metrics(data, equity, trades, in_market, fees, config):
     returns = equity.pct_change().dropna()
-    bar_length = data['timestamp'].diff().median()
-    periods_per_year = pd.Timedelta(days=365) / bar_length if bar_length > pd.Timedelta(0) else np.nan
+    seconds_per_bar = data['timestamp'].diff().median().total_seconds()
+    periods_per_year = 365 * 24 * 3600 / seconds_per_bar if seconds_per_bar > 0 else np.nan
     sharpe = returns.mean() / returns.std() * np.sqrt(periods_per_year) if returns.std() > 0 else np.nan
 
     wins, losses = trades[trades['pnl'] > 0], trades[trades['pnl'] <= 0]

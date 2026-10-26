@@ -4,6 +4,14 @@ SWING_LOOKBACK = 3
 ADX_TREND_THRESHOLD = 25
 
 
+def _first_of_plateau(pivots, lookback):
+    # Pivots closer than `lookback` bars can only be equal highs/lows of one plateau
+    positions = np.flatnonzero(pivots.notna().to_numpy())
+    pivots = pivots.copy()
+    pivots.iloc[positions[1:][np.diff(positions) <= lookback]] = np.nan
+    return pivots
+
+
 def find_swing_points(data, lookback=SWING_LOOKBACK):
     columns = ['Swing_High', 'Swing_Low', 'Last_Swing_High', 'Last_Swing_Low']
     if len(data) < 2 * lookback + 1:
@@ -16,8 +24,8 @@ def find_swing_points(data, lookback=SWING_LOOKBACK):
     rolling_high = data['high'].rolling(window=window, center=True).max()
     rolling_low = data['low'].rolling(window=window, center=True).min()
     # Pivots are marked on the bar where they happened (used for plotting) ...
-    data['Swing_High'] = data['high'].where(data['high'] == rolling_high)
-    data['Swing_Low'] = data['low'].where(data['low'] == rolling_low)
+    data['Swing_High'] = _first_of_plateau(data['high'].where(data['high'] == rolling_high), lookback)
+    data['Swing_Low'] = _first_of_plateau(data['low'].where(data['low'] == rolling_low), lookback)
     # ... but a pivot is only known `lookback` bars later, so signals use confirmed levels.
     data['Last_Swing_High'] = data['Swing_High'].shift(lookback).ffill()
     data['Last_Swing_Low'] = data['Swing_Low'].shift(lookback).ffill()
