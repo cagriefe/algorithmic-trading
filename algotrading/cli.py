@@ -8,6 +8,7 @@ from .analysis import run_analysis
 from .backtest import BacktestConfig, run_backtest
 from .data import INTERVALS, create_client, fetch_klines, load_csv
 from .edge import signal_edge
+from .html_report import write_report
 from .montecarlo import monte_carlo
 from .price_action import ADX_TREND_THRESHOLD, SWING_LOOKBACK
 from .report import print_backtest_report, print_edge_report, print_monte_carlo, print_signal_analysis
@@ -57,6 +58,7 @@ def parse_args(argv=None):
                         help='directory for CSV and chart files (default: %(default)s)')
     output.add_argument('--top', type=int, default=3, help='historical best signals to print (default: %(default)s)')
     output.add_argument('--edge', action='store_true', help='print forward returns after each signal type')
+    output.add_argument('--html', action='store_true', help='also write an interactive HTML report')
     output.add_argument('--no-plot', action='store_true', help='do not create the chart')
     output.add_argument('--show', action='store_true', help='also open the chart in a window')
     return parser.parse_args(argv)
@@ -80,18 +82,20 @@ def main(argv=None):
 
     data = run_analysis(data, lookback=args.swing_lookback, adx_threshold=args.adx_threshold)
     print_signal_analysis(data, top=args.top)
+    edge = signal_edge(data) if args.edge or args.html else None
     if args.edge:
-        print_edge_report(signal_edge(data))
+        print_edge_report(edge)
 
-    result = None
+    config = BacktestConfig(
+        initial_capital=args.capital, fee_rate=args.fee, slippage=args.slippage, risk_per_trade=args.risk,
+        stop_loss_atr=args.stop_atr, take_profit_atr=args.take_profit_atr, max_holding_bars=args.max_hold,
+        exit_on_breakdown=not args.no_breakdown_exit)
+    result = simulations = None
     if not args.no_backtest:
-        config = BacktestConfig(
-            initial_capital=args.capital, fee_rate=args.fee, slippage=args.slippage, risk_per_trade=args.risk,
-            stop_loss_atr=args.stop_atr, take_profit_atr=args.take_profit_atr, max_holding_bars=args.max_hold,
-            exit_on_breakdown=not args.no_breakdown_exit)
         result = run_backtest(data, config)
         print_backtest_report(result)
-        print_monte_carlo(monte_carlo(result.trades, config.initial_capital, args.simulations))
+        simulations = monte_carlo(result.trades, config.initial_capital, args.simulations)
+        print_monte_carlo(simulations)
         data['Equity'] = result.equity.to_numpy()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +107,10 @@ def main(argv=None):
         trades_path = args.output_dir / f'{name}_trades.csv'
         result.trades.to_csv(trades_path, index=False)
         print(f'Saved trades to {trades_path}')
+    if args.html:
+        report_path = args.output_dir / f'{name}_report.html'
+        write_report(report_path, data, result, config, simulations, edge, title=title)
+        print(f'Saved interactive report to {report_path}')
 
     if not args.no_plot:
         import matplotlib.pyplot as plt

@@ -1,12 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.dates import AutoDateLocator, DateFormatter
 
-
-def _readable_trendline(data, line, level):
-    # Break the line where a new pivot is confirmed and hide far extrapolations
-    new_segment = level.ne(level.shift(1))
-    too_far = (line - data['close']).abs() > 3 * data['ATR']
-    return line.mask(new_segment | too_far)
+from .price_action import display_trendline
 
 
 def plot_analysis(data, title='Technical Analysis Overview', backtest=None):
@@ -32,8 +27,8 @@ def plot_analysis(data, title='Technical Analysis Overview', backtest=None):
     # Swing points and trendlines
     ax1.scatter(data.index, data['Swing_High'], color='green', label='Swing High', marker='^', alpha=0.9)
     ax1.scatter(data.index, data['Swing_Low'], color='red', label='Swing Low', marker='v', alpha=0.9)
-    trendline_high = _readable_trendline(data, data['Trendline_High'], data['Last_Swing_High'])
-    trendline_low = _readable_trendline(data, data['Trendline_Low'], data['Last_Swing_Low'])
+    trendline_high = display_trendline(data, data['Trendline_High'], data['Last_Swing_High'])
+    trendline_low = display_trendline(data, data['Trendline_Low'], data['Last_Swing_Low'])
     ax1.plot(data.index, trendline_high, label='Trendline High', color='darkgreen', linestyle='-.', alpha=0.7)
     ax1.plot(data.index, trendline_low, label='Trendline Low', color='darkred', linestyle='-.', alpha=0.7)
 

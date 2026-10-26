@@ -69,6 +69,13 @@ def calculate_trendlines(data, lookback=SWING_LOOKBACK):
     return data
 
 
+def display_trendline(data, line, level):
+    """Trendline for charts: break it where a new pivot is confirmed and hide far extrapolations."""
+    new_segment = level.ne(level.shift(1))
+    too_far = (line - data['close']).abs() > 3 * data['ATR']
+    return line.mask(new_segment | too_far)
+
+
 def detect_trendline_breakouts(data, adx_threshold=ADX_TREND_THRESHOLD):
     data['Trendline_Breakout'] = _breakout_labels(data, data['Trendline_High'], data['Trendline_Low'], adx_threshold)
     return data
