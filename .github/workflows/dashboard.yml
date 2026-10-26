@@ -1,0 +1,58 @@
+name: Signal dashboard
+
+on:
+  schedule:
+    - cron: "20 0 * * *"  # daily, shortly after the UTC daily candle closes
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "algotrading/**"
+      - "main.py"
+      - "requirements.txt"
+      - ".github/workflows/dashboard.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Scan the market and build the dashboard
+        env:
+          # Optional repository secrets; alerts are only sent by the daily scheduled run
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALERT: ${{ github.event_name == 'schedule' && '--alert' || '' }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: >-
+          python main.py scan --top 20 --interval 1d --start "2 years ago UTC"
+          --html --output-dir site --dashboard-url "$DASHBOARD_URL" $ALERT
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
