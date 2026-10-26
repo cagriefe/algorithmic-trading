@@ -9,10 +9,14 @@ def _readable_trendline(data, line, level):
     return line.mask(new_segment | too_far)
 
 
-def plot_analysis(data, title='Technical Analysis Overview'):
-    """Draw price, indicators, breakouts and signals; returns the matplotlib figure."""
+def plot_analysis(data, title='Technical Analysis Overview', backtest=None):
+    """Draw price, indicators, breakouts, signals and optional backtest results; returns the figure."""
     data = data.set_index('timestamp')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+    if backtest is None:
+        fig, axes = plt.subplots(2, 1, figsize=(15, 12), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+    else:
+        fig, axes = plt.subplots(3, 1, figsize=(15, 15), sharex=True, gridspec_kw={'height_ratios': [3, 1, 1.3]})
+    ax1, ax2 = axes[0], axes[1]
 
     # Main price plot
     ax1.plot(data.index, data['close'], label='Close Price', color='blue', alpha=0.7)
@@ -47,17 +51,31 @@ def plot_analysis(data, title='Technical Analysis Overview'):
 
     # Volume subplot
     ax2.bar(data.index, data['volume'], color='blue', alpha=0.3, label='Volume')
+    ax2.set_ylabel('Volume')
 
-    for ax in (ax1, ax2):
+    if backtest is not None:
+        trades = backtest.trades
+        ax1.scatter(trades['entry_time'], trades['entry_price'], color='lime', edgecolors='black',
+                    marker='P', s=90, zorder=5, label='Trade Entry')
+        ax1.scatter(trades['exit_time'], trades['exit_price'], color='black', marker='X', s=70,
+                    zorder=5, label='Trade Exit')
+
+        ax3 = axes[2]
+        buy_and_hold = backtest.metrics['Initial capital'] * data['close'] / data['open'].iloc[0]
+        ax3.plot(backtest.equity.index, backtest.equity, color='green', label='Strategy')
+        ax3.plot(data.index, buy_and_hold, color='gray', linestyle='--', label='Buy & Hold')
+        ax3.set_ylabel('Equity')
+        ax3.legend(loc='upper left')
+
+    for ax in axes:
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_locator(AutoDateLocator())
         ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
-    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    plt.setp(axes[-1].xaxis.get_majorticklabels(), rotation=45, ha='right')
+    axes[-1].set_xlabel('Date')
 
     ax1.set_title(title, pad=20)
     ax1.set_ylabel('Price')
-    ax2.set_ylabel('Volume')
-    ax2.set_xlabel('Date')
     ax1.legend(bbox_to_anchor=(1.01, 1), loc='upper left')
     fig.tight_layout()
     return fig
