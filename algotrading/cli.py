@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 from .analysis import run_analysis
 from .backtest import BacktestConfig, run_backtest
 from .data import INTERVALS, create_client, fetch_klines, load_csv
+from .edge import signal_edge
+from .montecarlo import monte_carlo
 from .price_action import ADX_TREND_THRESHOLD, SWING_LOOKBACK
-from .report import print_backtest_report, print_signal_analysis
+from .report import print_backtest_report, print_edge_report, print_monte_carlo, print_signal_analysis
 
 
 def parse_args(argv=None):
@@ -47,11 +49,14 @@ def parse_args(argv=None):
     backtest.add_argument('--max-hold', type=int, help='close trades after this many bars (default: no limit)')
     backtest.add_argument('--no-breakdown-exit', action='store_true',
                           help='do not exit when price breaks below support')
+    backtest.add_argument('--simulations', type=int, default=2000,
+                          help='Monte Carlo resamples of the trades, 0 to skip (default: %(default)s)')
 
     output = parser.add_argument_group('output')
     output.add_argument('--output-dir', type=Path, default=Path('output'),
                         help='directory for CSV and chart files (default: %(default)s)')
     output.add_argument('--top', type=int, default=3, help='historical best signals to print (default: %(default)s)')
+    output.add_argument('--edge', action='store_true', help='print forward returns after each signal type')
     output.add_argument('--no-plot', action='store_true', help='do not create the chart')
     output.add_argument('--show', action='store_true', help='also open the chart in a window')
     return parser.parse_args(argv)
@@ -75,6 +80,8 @@ def main(argv=None):
 
     data = run_analysis(data, lookback=args.swing_lookback, adx_threshold=args.adx_threshold)
     print_signal_analysis(data, top=args.top)
+    if args.edge:
+        print_edge_report(signal_edge(data))
 
     result = None
     if not args.no_backtest:
@@ -84,6 +91,7 @@ def main(argv=None):
             exit_on_breakdown=not args.no_breakdown_exit)
         result = run_backtest(data, config)
         print_backtest_report(result)
+        print_monte_carlo(monte_carlo(result.trades, config.initial_capital, args.simulations))
         data['Equity'] = result.equity.to_numpy()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

@@ -31,8 +31,8 @@ class SignalScore:
     def max_score(self):
         return sum(self.weights.values())
 
-    def _components(self, data):
-        """Map each weight to (condition met per bar, reason text)."""
+    def conditions(self, data):
+        """Map each weight to (condition met per bar, label)."""
         return {
             'trendline_breakout': (data['Trendline_Breakout'] == 'Above', 'Trendline breakout'),
             'swing_breakout': (data['Breakout'] == 'Above', 'Swing point breakout'),
@@ -44,19 +44,19 @@ class SignalScore:
                                 'Above key moving averages'),
             'volume': (data['volume'] > data['Volume_SMA_20'], 'Above-average volume'),
             'rsi': ((data['RSI'] > 30) & (data['RSI'] < 70), 'RSI in healthy range'),
-            'pattern': (data['Pattern'].isin(BULLISH_PATTERNS),
-                        ('Bullish pattern: ' + data['Pattern'].astype(str)).to_numpy()),
+            'pattern': (data['Pattern'].isin(BULLISH_PATTERNS), 'Bullish pattern'),
         }
 
     def evaluate(self, data):
         score = np.zeros(len(data))
         reasons = [[] for _ in range(len(data))]
-        for component, (met, reason) in self._components(data).items():
+        patterns = data['Pattern'].to_numpy()
+        for component, (met, label) in self.conditions(data).items():
             weight = self.weights.get(component, 0.0)
             met = met.to_numpy(dtype=bool)
             score += np.where(met, weight, 0.0)
             for i in np.flatnonzero(met):
-                text = reason if isinstance(reason, str) else reason[i]
+                text = f'{label}: {patterns[i]}' if component == 'pattern' else label
                 reasons[i].append(f'{text} (weight: {weight})')
 
         confidence = score / self.max_score * 100

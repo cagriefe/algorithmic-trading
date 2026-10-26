@@ -10,11 +10,11 @@ def write_csv(market_data, tmp_path):
 def test_cli_runs_offline_from_csv(market_data, tmp_path, capsys):
     out = tmp_path / 'out'
 
-    assert main(['--csv', str(write_csv(market_data, tmp_path)), '--output-dir', str(out)]) == 0
+    assert main(['--csv', str(write_csv(market_data, tmp_path)), '--output-dir', str(out), '--edge']) == 0
 
     printed = capsys.readouterr().out
-    assert 'CURRENT SIGNAL' in printed
-    assert 'Backtest Results' in printed
+    for section in ['CURRENT SIGNAL', 'Signal Edge', 'Backtest Results', 'Monte Carlo']:
+        assert section in printed
     for suffix in ['analysis.csv', 'trades.csv', 'chart.png']:
         assert (out / f'synthetic_{suffix}').exists()
 

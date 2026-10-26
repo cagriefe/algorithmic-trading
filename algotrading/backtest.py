@@ -112,12 +112,21 @@ def run_backtest(data, config=None):
     return BacktestResult(trades, equity, metrics)
 
 
-def compute_metrics(data, equity, trades, in_market, fees, config):
+def equity_stats(equity):
+    """Total return, max drawdown and annualised Sharpe ratio of an equity curve indexed by time."""
     returns = equity.pct_change().dropna()
-    seconds_per_bar = data['timestamp'].diff().median().total_seconds()
+    seconds_per_bar = pd.Series(equity.index).diff().median().total_seconds()
     periods_per_year = 365 * 24 * 3600 / seconds_per_bar if seconds_per_bar > 0 else np.nan
     sharpe = returns.mean() / returns.std() * np.sqrt(periods_per_year) if returns.std() > 0 else np.nan
+    return {
+        'Total return %': (equity.iloc[-1] / equity.iloc[0] - 1) * 100,
+        'Max drawdown %': (equity / equity.cummax() - 1).min() * 100,
+        'Sharpe ratio': sharpe,
+    }
 
+
+def compute_metrics(data, equity, trades, in_market, fees, config):
+    stats = equity_stats(equity)
     wins, losses = trades[trades['pnl'] > 0], trades[trades['pnl'] <= 0]
     gross_loss = -losses['pnl'].sum()
     if gross_loss > 0:
@@ -132,8 +141,8 @@ def compute_metrics(data, equity, trades, in_market, fees, config):
         'Final equity': equity.iloc[-1],
         'Total return %': (equity.iloc[-1] / config.initial_capital - 1) * 100,
         'Buy & hold return %': (data['close'].iloc[-1] / data['open'].iloc[0] - 1) * 100,
-        'Max drawdown %': (equity / equity.cummax() - 1).min() * 100,
-        'Sharpe ratio': sharpe,
+        'Max drawdown %': stats['Max drawdown %'],
+        'Sharpe ratio': stats['Sharpe ratio'],
         'Trades': len(trades),
         'Win rate %': len(wins) / len(trades) * 100 if has_trades else np.nan,
         'Profit factor': profit_factor,

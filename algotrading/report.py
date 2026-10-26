@@ -54,3 +54,19 @@ def print_backtest_report(result, last_trades=10):
     print(f'\nLast {min(last_trades, len(trades))} trades:')
     columns = ['entry_time', 'entry_price', 'exit_time', 'exit_price', 'exit_reason', 'return_pct']
     print(trades[columns].tail(last_trades).to_string(index=False, float_format=lambda x: f'{x:.6g}'))
+
+
+def print_monte_carlo(stats):
+    if stats is None:
+        return
+    print(f"\n=== Monte Carlo ({stats['Simulations']:,} resampled trade sequences) ===")
+    print('-' * 80)
+    for name, value in stats.items():
+        if name != 'Simulations':
+            print(f'{name + ":":<32}{_format_metric(value)}')
+    print('-' * 80)
+
+
+def print_edge_report(table):
+    print('\n=== Signal Edge (what happened after each signal) ===')
+    print(table.to_string(index=False, float_format=lambda x: f'{x:.2f}', na_rep='-'))
