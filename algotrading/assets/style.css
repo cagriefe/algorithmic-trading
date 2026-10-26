@@ -69,6 +69,14 @@ h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
 
 .meter { height: 8px; margin: 10px 0 6px; overflow: hidden; background: #1f2636; border-radius: 99px; }
 .meter span { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--green)); }
+.meter.mini { display: inline-block; width: 56px; height: 6px; margin: 0 4px 0 0; vertical-align: middle; }
+
+.spark { display: block; }
+table.sortable th, table.sortable td { padding: 7px 8px; }
+table.sortable th { cursor: pointer; user-select: none; }
+table.sortable th[data-dir="asc"]::after { content: " \25B2"; }
+table.sortable th[data-dir="desc"]::after { content: " \25BC"; }
+td a { font-weight: 600; }
 
 .badge {
   display: inline-block;

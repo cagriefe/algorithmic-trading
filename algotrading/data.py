@@ -89,6 +89,15 @@ class BinanceClient:
     def tickers_24h(self):
         return self._get('/api/v3/ticker/24hr')
 
+    def ping(self):
+        return self._get('/api/v3/ping')
+
+    def copy(self):
+        """A client with its own HTTP session that keeps the resolved host, e.g. one per thread."""
+        clone = BinanceClient(timeout=self.timeout, retries=self.retries)
+        clone.base_url = self.base_url
+        return clone
+
 
 def create_client(tld='com'):
     return BinanceClient(tld=tld)

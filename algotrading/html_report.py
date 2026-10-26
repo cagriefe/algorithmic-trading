@@ -19,11 +19,11 @@ DECISION_CLASSES = {'Strong Long': 'strong-long', 'Long': 'long'}
 EXIT_LABELS = {'Take profit': 'TP', 'Stop loss': 'SL', 'Breakdown': 'Exit', 'Time exit': 'Time', 'End of data': 'Open'}
 
 
-def _escape(value):
+def escape(value):
     return html.escape(str(value))
 
 
-def _fmt(value, decimals=2, suffix='', signed=False):
+def fmt(value, decimals=2, suffix='', signed=False):
     if value is None or pd.isna(value):
         return '&ndash;'
     if np.isinf(value):
@@ -32,14 +32,14 @@ def _fmt(value, decimals=2, suffix='', signed=False):
     return f'{sign}{value:,.{decimals}f}{suffix}'
 
 
-def _tone(value):
+def tone(value):
     if value is None or pd.isna(value) or value == 0:
         return ''
     return 'pos' if value > 0 else 'neg'
 
 
 def badge(decision):
-    return f'<span class="badge {DECISION_CLASSES.get(decision, "neutral")}">{_escape(decision)}</span>'
+    return f'<span class="badge {DECISION_CLASSES.get(decision, "neutral")}">{escape(decision)}</span>'
 
 
 def price_precision(prices):
@@ -124,7 +124,7 @@ def embed_json(payload):
 def _signal_card(last, max_score, precision):
     decision = last['Decision']
     return (f'<div class="signal-card"><div class="label">Signal on the last closed bar</div>'
-            f'<div class="decision {DECISION_CLASSES.get(decision, "")}">{_escape(decision)}</div>'
+            f'<div class="decision {DECISION_CLASSES.get(decision, "")}">{escape(decision)}</div>'
             f'<div class="meter"><span style="width:{min(max(last["Confidence"], 0), 100):.0f}%"></span></div>'
             f'<div class="sub">Score {last["Score"]:.1f} / {max_score:g} &middot; {last["Confidence"]:.0f}% confidence'
             f' &middot; close {last["close"]:,.{precision}f}</div></div>')
@@ -133,18 +133,18 @@ def _signal_card(last, max_score, precision):
 def _cards(result, monte_carlo_stats):
     m = result.metrics
     cards = [
-        ('Strategy return', _fmt(m['Total return %'], signed=True, suffix='%'), _tone(m['Total return %']),
-         f'Buy &amp; hold {_fmt(m["Buy & hold return %"], signed=True, suffix="%")}'),
-        ('Max drawdown', _fmt(m['Max drawdown %'], suffix='%'), 'neg' if m['Max drawdown %'] < 0 else '',
-         f'Exposure {_fmt(m["Exposure %"], 0, "%")}'),
-        ('Sharpe ratio', _fmt(m['Sharpe ratio']), _tone(m['Sharpe ratio']), 'annualised'),
-        ('Win rate', _fmt(m['Win rate %'], 1, '%'), '', f'{m["Trades"]} trades'),
-        ('Profit factor', _fmt(m['Profit factor']), _tone(m['Profit factor'] - 1),
-         f'Avg trade {_fmt(m["Avg trade return %"], signed=True, suffix="%")}'),
-        ('Fees paid', _fmt(m['Fees paid']), '', f'Capital {_fmt(m["Initial capital"], 0)}'),
+        ('Strategy return', fmt(m['Total return %'], signed=True, suffix='%'), tone(m['Total return %']),
+         f'Buy &amp; hold {fmt(m["Buy & hold return %"], signed=True, suffix="%")}'),
+        ('Max drawdown', fmt(m['Max drawdown %'], suffix='%'), 'neg' if m['Max drawdown %'] < 0 else '',
+         f'Exposure {fmt(m["Exposure %"], 0, "%")}'),
+        ('Sharpe ratio', fmt(m['Sharpe ratio']), tone(m['Sharpe ratio']), 'annualised'),
+        ('Win rate', fmt(m['Win rate %'], 1, '%'), '', f'{m["Trades"]} trades'),
+        ('Profit factor', fmt(m['Profit factor']), tone(m['Profit factor'] - 1),
+         f'Avg trade {fmt(m["Avg trade return %"], signed=True, suffix="%")}'),
+        ('Fees paid', fmt(m['Fees paid']), '', f'Capital {fmt(m["Initial capital"], 0)}'),
     ]
     if monte_carlo_stats:
-        cards.append(('Chance of loss', _fmt(monte_carlo_stats['Probability of loss %'], 0, '%'), '',
+        cards.append(('Chance of loss', fmt(monte_carlo_stats['Probability of loss %'], 0, '%'), '',
                       f'{monte_carlo_stats["Simulations"]:,} Monte Carlo runs'))
     return '<section class="cards">' + ''.join(
         f'<div class="card"><div class="label">{label}</div><div class="value {tone}">{value}</div>'
@@ -157,7 +157,7 @@ def _checklist(data, scorer):
     for component, (met, label) in scorer.conditions(last).items():
         ok = bool(met.iloc[0])
         text = f'{label}: {last["Pattern"].iloc[0]}' if component == 'pattern' and ok else label
-        items.append(f'<li><span class="{"ok" if ok else "no"}">{_escape(text)}</span>'
+        items.append(f'<li><span class="{"ok" if ok else "no"}">{escape(text)}</span>'
                      f'<span class="muted">+{scorer.weights[component]:g}</span></li>')
     return '<ul class="checklist">' + ''.join(items) + '</ul>'
 
@@ -188,19 +188,19 @@ def _key_value_table(stats):
         if name == 'Simulations':
             continue
         is_return = 'return' in name.lower()
-        rows.append(f'<tr><td>{_escape(name)}</td><td class="{_tone(value) if is_return else ""}">'
-                    f'{_fmt(value, signed=is_return)}</td></tr>')
+        rows.append(f'<tr><td>{escape(name)}</td><td class="{tone(value) if is_return else ""}">'
+                    f'{fmt(value, signed=is_return)}</td></tr>')
     return f'<table><tbody>{"".join(rows)}</tbody></table>'
 
 
 def _edge_table(table):
-    head = ''.join(f'<th>{_escape(column)}</th>' for column in table.columns)
+    head = ''.join(f'<th>{escape(column)}</th>' for column in table.columns)
     rows = []
     for record in table.itertuples(index=False):
-        cells = [f'<td>{_escape(record[0])}</td>', f'<td>{record[1]}</td>']
+        cells = [f'<td>{escape(record[0])}</td>', f'<td>{record[1]}</td>']
         for column, value in zip(table.columns[2:], record[2:]):
             signed = not column.startswith('Hit')
-            cells.append(f'<td class="{_tone(value) if signed else ""}">{_fmt(value, signed=signed)}</td>')
+            cells.append(f'<td class="{tone(value) if signed else ""}">{fmt(value, signed=signed)}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
     return f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
 
@@ -211,8 +211,8 @@ def _trades_table(trades, precision, intraday):
     time_format = '%Y-%m-%d %H:%M' if intraday else '%Y-%m-%d'
     rows = ''.join(
         f'<tr><td>{t.entry_time:{time_format}}</td><td>{t.entry_price:,.{precision}f}</td>'
-        f'<td>{t.exit_time:{time_format}}</td><td>{t.exit_price:,.{precision}f}</td><td>{_escape(t.exit_reason)}</td>'
-        f'<td>{t.bars_held}</td><td class="{_tone(t.return_pct)}">{_fmt(t.return_pct, signed=True, suffix="%")}</td></tr>'
+        f'<td>{t.exit_time:{time_format}}</td><td>{t.exit_price:,.{precision}f}</td><td>{escape(t.exit_reason)}</td>'
+        f'<td>{t.bars_held}</td><td class="{tone(t.return_pct)}">{fmt(t.return_pct, signed=True, suffix="%")}</td></tr>'
         for t in trades.iloc[::-1].itertuples())
     head = ''.join(f'<th>{name}</th>' for name in ['Entry', 'Entry price', 'Exit', 'Exit price', 'Reason', 'Bars',
                                                     'Return'])
@@ -222,7 +222,7 @@ def _trades_table(trades, precision, intraday):
 def page(title, body, scripts=''):
     css = (ASSETS / 'style.css').read_text(encoding='utf-8')
     return (f'<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>{_escape(title)}</title>\n'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>{escape(title)}</title>\n'
             f'<style>\n{css}</style>\n</head>\n<body>\n<div class="wrap">\n{body}\n'
             f'<footer>Generated by <a href="{REPO_URL}">algotrading</a> v{__version__} &middot; '
             f'charts by TradingView Lightweight Charts&trade; &middot; for education and research only, '
@@ -241,9 +241,9 @@ def render_report(data, result=None, config=None, monte_carlo_stats=None, edge_t
     time_format = '%Y-%m-%d %H:%M' if intraday else '%Y-%m-%d'
     period = f'{data["timestamp"].iloc[0]:{time_format}} &rarr; {data["timestamp"].iloc[-1]:{time_format}}'
 
-    back = f'<a href="{_escape(back_link)}">&larr; All markets</a>' if back_link else ''
+    back = f'<a href="{escape(back_link)}">&larr; All markets</a>' if back_link else ''
     body = [
-        f'<header class="top"><div>{back}<h1>{_escape(title)}</h1><p class="muted">{period} &middot; '
+        f'<header class="top"><div>{back}<h1>{escape(title)}</h1><p class="muted">{period} &middot; '
         f'{len(data):,} bars &middot; generated {generated_at:%Y-%m-%d %H:%M} UTC</p></div>'
         f'{_signal_card(last, scorer.max_score, precision)}</header>',
     ]

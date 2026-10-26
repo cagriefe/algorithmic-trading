@@ -1,81 +1,120 @@
 import argparse
+import sys
+import threading
 from pathlib import Path
 
-import matplotlib
 from dotenv import load_dotenv
 
+from . import __version__
 from .analysis import run_analysis
 from .backtest import BacktestConfig, run_backtest
+from .dashboard import write_dashboard
 from .data import INTERVALS, create_client, fetch_klines, load_csv
 from .edge import signal_edge
 from .html_report import write_report
 from .montecarlo import monte_carlo
 from .price_action import ADX_TREND_THRESHOLD, SWING_LOOKBACK
-from .report import print_backtest_report, print_edge_report, print_monte_carlo, print_signal_analysis
+from .report import (print_backtest_report, print_edge_report, print_monte_carlo, print_scan_report,
+                     print_signal_analysis)
+from .scanner import scan_markets, top_symbols
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        description='Technical analysis, pattern recognition and signal scoring for Binance markets.')
-    source = parser.add_argument_group('data')
-    source.add_argument('--symbol', default='APEUSDT', help='Binance trading pair (default: %(default)s)')
-    source.add_argument('--interval', default='1d', choices=INTERVALS, help='candle interval (default: %(default)s)')
-    source.add_argument('--start', default='1 year ago UTC',
-                        help='start of the history, e.g. "2024-01-01" or "6 months ago UTC" (default: %(default)s)')
-    source.add_argument('--end', help='end of the history (default: now)')
-    source.add_argument('--csv', type=Path, help='load OHLCV data from a CSV file instead of Binance')
-    source.add_argument('--tld', default='com', help="Binance domain, use 'us' for Binance.US (default: %(default)s)")
+def _market_options():
+    parser = argparse.ArgumentParser(add_help=False)
+    group = parser.add_argument_group('market data')
+    group.add_argument('--interval', default='1d', choices=INTERVALS, help='candle interval (default: %(default)s)')
+    group.add_argument('--start', default='1 year ago UTC',
+                       help='start of the history, e.g. "2024-01-01" or "6 months ago UTC" (default: %(default)s)')
+    group.add_argument('--end', help='end of the history (default: now)')
+    group.add_argument('--tld', default='com', help="Binance domain, use 'us' for Binance.US (default: %(default)s)")
+    return parser
 
-    strategy = parser.add_argument_group('strategy')
-    strategy.add_argument('--swing-lookback', type=int, default=SWING_LOOKBACK,
-                          help='bars on each side of a swing pivot (default: %(default)s)')
-    strategy.add_argument('--adx-threshold', type=float, default=ADX_TREND_THRESHOLD,
-                          help='minimum ADX for a trending market (default: %(default)s)')
 
+def _strategy_options():
+    parser = argparse.ArgumentParser(add_help=False)
+    group = parser.add_argument_group('strategy')
+    group.add_argument('--swing-lookback', type=int, default=SWING_LOOKBACK,
+                       help='bars on each side of a swing pivot (default: %(default)s)')
+    group.add_argument('--adx-threshold', type=float, default=ADX_TREND_THRESHOLD,
+                       help='minimum ADX for a trending market (default: %(default)s)')
+    return parser
+
+
+def _backtest_options():
     defaults = BacktestConfig()
-    backtest = parser.add_argument_group('backtest')
-    backtest.add_argument('--no-backtest', action='store_true', help='only analyse signals, do not backtest')
-    backtest.add_argument('--capital', type=float, default=defaults.initial_capital,
-                          help='initial capital (default: %(default)s)')
-    backtest.add_argument('--fee', type=float, default=defaults.fee_rate,
-                          help='fee per fill as a fraction, 0.001 = 0.1%% (default: %(default)s)')
-    backtest.add_argument('--slippage', type=float, default=defaults.slippage,
-                          help='slippage per fill as a fraction (default: %(default)s)')
-    backtest.add_argument('--risk', type=float, default=defaults.risk_per_trade,
-                          help='share of equity risked per trade (default: %(default)s)')
-    backtest.add_argument('--stop-atr', type=float, default=defaults.stop_loss_atr,
-                          help='stop loss distance in ATRs (default: %(default)s)')
-    backtest.add_argument('--take-profit-atr', type=float, default=defaults.take_profit_atr,
-                          help='take profit distance in ATRs (default: %(default)s)')
-    backtest.add_argument('--max-hold', type=int, help='close trades after this many bars (default: no limit)')
-    backtest.add_argument('--no-breakdown-exit', action='store_true',
-                          help='do not exit when price breaks below support')
-    backtest.add_argument('--simulations', type=int, default=2000,
-                          help='Monte Carlo resamples of the trades, 0 to skip (default: %(default)s)')
+    parser = argparse.ArgumentParser(add_help=False)
+    group = parser.add_argument_group('backtest')
+    group.add_argument('--capital', type=float, default=defaults.initial_capital,
+                       help='initial capital (default: %(default)s)')
+    group.add_argument('--fee', type=float, default=defaults.fee_rate,
+                       help='fee per fill as a fraction, 0.001 = 0.1%% (default: %(default)s)')
+    group.add_argument('--slippage', type=float, default=defaults.slippage,
+                       help='slippage per fill as a fraction (default: %(default)s)')
+    group.add_argument('--risk', type=float, default=defaults.risk_per_trade,
+                       help='share of equity risked per trade (default: %(default)s)')
+    group.add_argument('--stop-atr', type=float, default=defaults.stop_loss_atr,
+                       help='stop loss distance in ATRs (default: %(default)s)')
+    group.add_argument('--take-profit-atr', type=float, default=defaults.take_profit_atr,
+                       help='take profit distance in ATRs (default: %(default)s)')
+    group.add_argument('--max-hold', type=int, help='close trades after this many bars (default: no limit)')
+    group.add_argument('--no-breakdown-exit', action='store_true', help='do not exit when price breaks below support')
+    group.add_argument('--simulations', type=int, default=2000,
+                       help='Monte Carlo resamples of the trades, 0 to skip (default: %(default)s)')
+    return parser
 
-    output = parser.add_argument_group('output')
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog='main.py',
+        description='Technical analysis, signal scoring, backtesting and market scanning for Binance.',
+        epilog='Without a command "analyze" is used, e.g. python main.py --symbol BTCUSDT')
+    parser.add_argument('--version', action='version', version=f'algotrading {__version__}')
+    commands = parser.add_subparsers(dest='command', metavar='COMMAND')
+    shared = [_market_options(), _strategy_options(), _backtest_options()]
+
+    analyze = commands.add_parser('analyze', parents=shared, help='analyse and backtest one market (default)',
+                                  description='Analyse and backtest one market.')
+    analyze.add_argument('--symbol', default='APEUSDT', help='Binance trading pair (default: %(default)s)')
+    analyze.add_argument('--csv', type=Path, help='load OHLCV data from a CSV file instead of Binance')
+    analyze.add_argument('--no-backtest', action='store_true', help='only analyse signals, do not backtest')
+    output = analyze.add_argument_group('output')
     output.add_argument('--output-dir', type=Path, default=Path('output'),
-                        help='directory for CSV and chart files (default: %(default)s)')
+                        help='directory for CSV, chart and report files (default: %(default)s)')
     output.add_argument('--top', type=int, default=3, help='historical best signals to print (default: %(default)s)')
     output.add_argument('--edge', action='store_true', help='print forward returns after each signal type')
     output.add_argument('--html', action='store_true', help='also write an interactive HTML report')
-    output.add_argument('--no-plot', action='store_true', help='do not create the chart')
+    output.add_argument('--no-plot', action='store_true', help='do not create the PNG chart')
     output.add_argument('--show', action='store_true', help='also open the chart in a window')
-    return parser.parse_args(argv)
+
+    scan = commands.add_parser('scan', parents=shared, help='rank many markets by their current signal',
+                               description='Analyse and backtest many markets and rank them by their current signal.')
+    scan.add_argument('--symbols', help='comma-separated pairs, e.g. BTCUSDT,ETHUSDT (default: the most traded)')
+    scan.add_argument('--top', type=int, default=20, help='number of most traded pairs to scan (default: %(default)s)')
+    scan.add_argument('--quote', default='USDT', help='quote asset of the most traded pairs (default: %(default)s)')
+    scan.add_argument('--workers', type=int, default=8, help='markets analysed in parallel (default: %(default)s)')
+    scan.add_argument('--output-dir', type=Path, default=Path('output'),
+                      help='directory for scan.csv and the dashboard (default: %(default)s)')
+    scan.add_argument('--html', action='store_true', help='write a dashboard (index.html) and a report per market')
+    return parser
 
 
-def main(argv=None):
-    args = parse_args(argv)
+def backtest_config(args):
+    return BacktestConfig(
+        initial_capital=args.capital, fee_rate=args.fee, slippage=args.slippage, risk_per_trade=args.risk,
+        stop_loss_atr=args.stop_atr, take_profit_atr=args.take_profit_atr, max_holding_bars=args.max_hold,
+        exit_on_breakdown=not args.no_breakdown_exit)
+
+
+def run_analyze(args):
     if not args.show:
+        import matplotlib
         matplotlib.use('Agg')
-    load_dotenv()
 
     if args.csv:
         data = load_csv(args.csv)
         name = title = args.csv.stem
     else:
-        client = create_client(args.tld)
-        data = fetch_klines(args.symbol, args.interval, args.start, args.end, client=client)
+        data = fetch_klines(args.symbol, args.interval, args.start, args.end, client=create_client(args.tld))
         name, title = f'{args.symbol}_{args.interval}', f'{args.symbol} ({args.interval})'
     if data.empty:
         raise SystemExit('No market data returned; check the symbol, interval and date range.')
@@ -86,10 +125,7 @@ def main(argv=None):
     if args.edge:
         print_edge_report(edge)
 
-    config = BacktestConfig(
-        initial_capital=args.capital, fee_rate=args.fee, slippage=args.slippage, risk_per_trade=args.risk,
-        stop_loss_atr=args.stop_atr, take_profit_atr=args.take_profit_atr, max_holding_bars=args.max_hold,
-        exit_on_breakdown=not args.no_breakdown_exit)
+    config = backtest_config(args)
     result = simulations = None
     if not args.no_backtest:
         result = run_backtest(data, config)
@@ -124,3 +160,49 @@ def main(argv=None):
             plt.show()
         plt.close(fig)
     return 0
+
+
+def run_scan(args):
+    client = create_client(args.tld)
+    if args.symbols:
+        symbols = [symbol.strip().upper() for symbol in args.symbols.split(',') if symbol.strip()]
+        client.ping()  # resolve the reachable host once before the threads start
+        subtitle = f'{len(symbols)} Binance markets'
+    else:
+        symbols = top_symbols(client, args.top, args.quote)
+        subtitle = f'Top {len(symbols)} Binance {args.quote} markets by 24h volume'
+    subtitle += f' · {args.interval} candles since {args.start}'
+    print(f'Scanning {len(symbols)} markets ({args.interval} candles since {args.start})...')
+
+    local = threading.local()
+
+    def fetch(symbol):
+        if not hasattr(local, 'client'):
+            local.client = client.copy()
+        return fetch_klines(symbol, args.interval, args.start, args.end, client=local.client)
+
+    config = backtest_config(args)
+    summary, details, errors = scan_markets(symbols, fetch, config, workers=args.workers,
+                                            lookback=args.swing_lookback, adx_threshold=args.adx_threshold)
+    print_scan_report(summary, errors)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(args.output_dir / 'scan.csv', index=False)
+    print(f'\nSaved ranking to {args.output_dir / "scan.csv"}')
+    if args.html:
+        index = write_dashboard(args.output_dir, summary, details, config, args.interval, args.simulations,
+                                subtitle=subtitle, errors=errors)
+        print(f'Saved dashboard to {index}')
+    return 0 if details else 1
+
+
+HANDLERS = {'analyze': run_analyze, 'scan': run_scan}
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] not in (*HANDLERS, '-h', '--help', '--version'):
+        argv.insert(0, 'analyze')
+    args = build_parser().parse_args(argv)
+    load_dotenv()
+    return HANDLERS[args.command](args)

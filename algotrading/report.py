@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 
 def _print_signal(row):
@@ -65,6 +66,33 @@ def print_monte_carlo(stats):
         if name != 'Simulations':
             print(f'{name + ":":<32}{_format_metric(value)}')
     print('-' * 80)
+
+
+def _signed(value):
+    return '-' if pd.isna(value) else f'{value:+.2f}'
+
+
+SCAN_COLUMNS = ['Symbol', 'Decision', 'Score', 'Close', 'Pattern', 'Bars since signal', 'RSI', 'Strategy %',
+                'Buy & hold %', 'Max DD %', 'Trades']
+SCAN_FORMATTERS = {
+    'Score': lambda v: f'{v:.1f}',
+    'Close': lambda v: f'{v:,.6g}',
+    'Bars since signal': lambda v: f'{int(v)}',
+    'RSI': lambda v: f'{v:.0f}',
+    'Strategy %': _signed,
+    'Buy & hold %': _signed,
+    'Max DD %': _signed,
+}
+
+
+def print_scan_report(summary, errors):
+    print('\n=== Market Scan (ranked by current signal) ===')
+    if summary.empty:
+        print('No markets could be analysed.')
+    else:
+        print(summary[SCAN_COLUMNS].to_string(index=False, formatters=SCAN_FORMATTERS, na_rep='-'))
+    for symbol, error in errors.items():
+        print(f'Skipped {symbol}: {error}')
 
 
 def print_edge_report(table):
