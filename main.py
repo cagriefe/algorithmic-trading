@@ -1,13 +1,13 @@
 import os
+import time
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from binance.client import Client
 from dotenv import load_dotenv
 import talib
-from scipy.stats import linregress
 from matplotlib.dates import DateFormatter, AutoDateLocator
-from score import *
+from score import evaluate_signals
 
 # Set display options to show all columns and rows
 pd.set_option('display.max_columns', None)
@@ -23,14 +23,18 @@ API_SECRET = os.getenv('API_SECRET')
 
 client = Client(API_KEY, API_SECRET)
 
+SWING_LOOKBACK = 3
+ADX_TREND_THRESHOLD = 25
+
 
 def get_historical_data(symbol, interval, start_str):
     klines = client.get_historical_klines(symbol, interval, start_str)
     data = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
-    data['close'] = data['close'].astype(float)
-    data['high'] = data['high'].astype(float)
-    data['low'] = data['low'].astype(float)
-    data['volume'] = data['volume'].astype(float)
+    # Binance returns the still-forming candle last; using it would make signals repaint.
+    now_ms = int(time.time() * 1000)
+    data = data[data['close_time'].astype('int64') < now_ms].reset_index(drop=True)
+    for column in ['open', 'high', 'low', 'close', 'volume']:
+        data[column] = data[column].astype(float)
     data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
     return data
 
@@ -42,161 +46,191 @@ def calculate_indicators(data):
     data['RSI'] = talib.RSI(data['close'], timeperiod=14)
     data['MACD'], data['MACD_signal'], _ = talib.MACD(data['close'], fastperiod=12, slowperiod=26, signalperiod=9)
     data['ADX'] = talib.ADX(data['high'], data['low'], data['close'], timeperiod=14)
+    data['PLUS_DI'] = talib.PLUS_DI(data['high'], data['low'], data['close'], timeperiod=14)
+    data['MINUS_DI'] = talib.MINUS_DI(data['high'], data['low'], data['close'], timeperiod=14)
     data['ATR'] = talib.ATR(data['high'], data['low'], data['close'], timeperiod=14)
     data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+    data['Volume_SMA_20'] = talib.SMA(data['volume'], timeperiod=20)
     return data
 
-def find_swing_points(data, lookback=3):
+def find_swing_points(data, lookback=SWING_LOOKBACK):
+    columns = ['Swing_High', 'Swing_Low', 'Last_Swing_High', 'Last_Swing_Low']
     if len(data) < 2 * lookback + 1:
         print("Insufficient data to detect swing points.")
-        data['Swing_High'] = np.nan
-        data['Swing_Low'] = np.nan
+        for column in columns:
+            data[column] = np.nan
         return data
 
-    data['Swing_High'] = data['high'].rolling(window=2 * lookback + 1, center=True).apply(
-        lambda x: x[lookback] if x[lookback] == max(x) else np.nan, raw=True
-    )
-    data['Swing_Low'] = data['low'].rolling(window=2 * lookback + 1, center=True).apply(
-        lambda x: x[lookback] if x[lookback] == min(x) else np.nan, raw=True
-    )
+    window = 2 * lookback + 1
+    rolling_high = data['high'].rolling(window=window, center=True).max()
+    rolling_low = data['low'].rolling(window=window, center=True).min()
+    # Pivots are marked on the bar where they happened (used for plotting) ...
+    data['Swing_High'] = data['high'].where(data['high'] == rolling_high)
+    data['Swing_Low'] = data['low'].where(data['low'] == rolling_low)
+    # ... but a pivot is only known `lookback` bars later, so signals use confirmed levels.
+    data['Last_Swing_High'] = data['Swing_High'].shift(lookback).ffill()
+    data['Last_Swing_Low'] = data['Swing_Low'].shift(lookback).ffill()
     return data
+
+def _breakout_labels(data, resistance, support):
+    # Only consider breakouts in trending markets with above-average volume
+    confirmed = (data['ADX'] > ADX_TREND_THRESHOLD) & (data['volume'] > data['Volume_SMA_20'])
+    close, prev_close = data['close'], data['close'].shift(1)
+    above = confirmed & (close > resistance) & (prev_close <= resistance.shift(1))
+    below = confirmed & (close < support) & (prev_close >= support.shift(1))
+    return np.select([above, below], ['Above', 'Below'], default='No')
 
 def detect_breakouts(data):
-    data['Breakout'] = 'No'
-    for i in range(1, len(data)):
-        if data['ADX'][i] > 25:  # Only consider breakouts in trending markets
-            if not pd.isna(data['Swing_High'][i-1]) and data['close'][i] > data['Swing_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
-                data.loc[i, 'Breakout'] = 'Above'
-            elif not pd.isna(data['Swing_Low'][i-1]) and data['close'][i] < data['Swing_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
-                data.loc[i, 'Breakout'] = 'Below'
+    data['Breakout'] = _breakout_labels(data, data['Last_Swing_High'], data['Last_Swing_Low'])
     return data
 
-def calculate_trendlines(data):
-    swing_highs = data.dropna(subset=['Swing_High'])
-    swing_lows = data.dropna(subset=['Swing_Low'])
-    
-    if len(swing_highs) > 1:
-        slope_high, intercept_high, _, _, _ = linregress(swing_highs.index, swing_highs['Swing_High'])
-        data['Trendline_High'] = slope_high * data.index + intercept_high
-    else:
-        print("Insufficient swing highs for trendline calculation.")
-        data['Trendline_High'] = np.nan
-    
-    if len(swing_lows) > 1:
-        slope_low, intercept_low, _, _, _ = linregress(swing_lows.index, swing_lows['Swing_Low'])
-        data['Trendline_Low'] = slope_low * data.index + intercept_low
-    else:
-        print("Insufficient swing lows for trendline calculation.")
-        data['Trendline_Low'] = np.nan
-    
+def _causal_trendline(pivots, lookback, n_points=2):
+    """Line through the last `n_points` pivots, using only pivots confirmed at each bar."""
+    values = pivots.to_numpy(dtype=float)
+    positions = np.flatnonzero(~np.isnan(values))
+    line = np.full(len(values), np.nan)
+    for k in range(n_points - 1, len(positions)):
+        start = positions[k] + lookback
+        if start >= len(values):
+            break
+        end = positions[k + 1] + lookback if k + 1 < len(positions) else len(values)
+        xs = positions[k - n_points + 1:k + 1]
+        slope, intercept = np.polyfit(xs, values[xs], 1)
+        bars = np.arange(start, min(end, len(values)))
+        line[bars] = slope * bars + intercept
+    return line
+
+def calculate_trendlines(data, lookback=SWING_LOOKBACK):
+    data['Trendline_High'] = _causal_trendline(data['Swing_High'], lookback)
+    data['Trendline_Low'] = _causal_trendline(data['Swing_Low'], lookback)
     return data
 
 def detect_trendline_breakouts(data):
-    data['Trendline_Breakout'] = 'No'
-    for i in range(1, len(data)):
-        if data['ADX'][i] > 25:  # Only consider trendline breakouts in trending markets
-            if not pd.isna(data['Trendline_High'][i-1]) and data['close'][i] > data['Trendline_High'][i-1] and data['volume'][i] > data['volume'][i-1]:
-                data.loc[i, 'Trendline_Breakout'] = 'Above'
-            elif not pd.isna(data['Trendline_Low'][i-1]) and data['close'][i] < data['Trendline_Low'][i-1] and data['volume'][i] > data['volume'][i-1]:
-                data.loc[i, 'Trendline_Breakout'] = 'Below'
+    data['Trendline_Breakout'] = _breakout_labels(data, data['Trendline_High'], data['Trendline_Low'])
     return data
 
-def detect_chart_patterns(data):
-    data['Pattern'] = 'None'
-    window = 20  # Pattern detection window
-    
-    for i in range(window, len(data)):
-        window_data = data.iloc[i-window:i+1]
-        
-        # Head and Shoulders
-        if i > window + 10:
-            left_shoulder = max(data['high'][i-window:i-window//2])
-            head = max(data['high'][i-window//2:i-5])
-            right_shoulder = max(data['high'][i-5:i])
-            neckline = min(data['low'][i-window:i])
-            
-            if (left_shoulder < head and right_shoulder < head and 
-                abs(left_shoulder - right_shoulder)/left_shoulder < 0.02):
-                data.loc[i, 'Pattern'] = 'Head and Shoulders'
-        
-        # Inverse Head and Shoulders
-        if i > window + 10:
-            left_valley = min(data['low'][i-window:i-window//2])
-            head_valley = min(data['low'][i-window//2:i-5])
-            right_valley = min(data['low'][i-5:i])
-            neckline = max(data['high'][i-window:i])
-            
-            if (left_valley > head_valley and right_valley > head_valley and 
-                abs(left_valley - right_valley)/left_valley < 0.02):
-                data.loc[i, 'Pattern'] = 'Inverse Head and Shoulders'
-        
-        # Double Top
-        if i > 5:
-            if (data['high'][i-1] > data['high'][i] and 
-                abs(data['high'][i-1] - data['high'][i-3])/data['high'][i-1] < 0.02 and
-                data['high'][i-2] < data['high'][i-1]):
-                data.loc[i, 'Pattern'] = 'Double Top'
-        
-        # Double Bottom
-        if i > 5:
-            if (data['low'][i-1] < data['low'][i] and 
-                abs(data['low'][i-1] - data['low'][i-3])/data['low'][i-1] < 0.02 and
-                data['low'][i-2] > data['low'][i-1]):
-                data.loc[i, 'Pattern'] = 'Double Bottom'
-        
-        # Triple Top
-        if i > 10:
-            tops = [data['high'][i-j] for j in range(1, 7)]
-            if (len(set(round(x, 2) for x in tops[:3])) == 1 and
-                all(x < max(tops[:3]) for x in tops[3:])):
-                data.loc[i, 'Pattern'] = 'Triple Top'
-        
-        # Triple Bottom
-        if i > 10:
-            bottoms = [data['low'][i-j] for j in range(1, 7)]
-            if (len(set(round(x, 2) for x in bottoms[:3])) == 1 and
-                all(x > min(bottoms[:3]) for x in bottoms[3:])):
-                data.loc[i, 'Pattern'] = 'Triple Bottom'
-        
-        # Bull Flag
-        if i > window:
-            if (data['close'][i-window:i].is_monotonic_increasing and
-                data['high'][i-5:i].is_monotonic_decreasing):
-                data.loc[i, 'Pattern'] = 'Bull Flag'
-        
-        # Bear Flag
-        if i > window:
-            if (data['close'][i-window:i].is_monotonic_decreasing and
-                data['low'][i-5:i].is_monotonic_increasing):
-                data.loc[i, 'Pattern'] = 'Bear Flag'
-        
-        # Rectangle (Trading Range)
-        if i > window:
-            price_range = data['high'][i-window:i] - data['low'][i-window:i]
-            if price_range.std() < price_range.mean() * 0.1:
-                data.loc[i, 'Pattern'] = 'Rectangle'
-        
-        # Cup and Handle
-        if i > window + 10:
-            cup_section = data['close'][i-window:i-5]
-            handle_section = data['close'][i-5:i]
-            if (cup_section.is_monotonic_decreasing and 
-                handle_section.is_monotonic_increasing and
-                min(cup_section) > min(handle_section)):
-                data.loc[i, 'Pattern'] = 'Cup and Handle'
-                
+def _peak_formations(pivots, opposite, atr, lookback, tolerance_atr, prominence_atr, max_width):
+    """Find double/triple/head-and-shoulders formations among confirmed peaks.
+
+    Yields (confirmation_bar, kind) with kind in {'hs', 'triple', 'double'}.
+    Bottoms are handled by passing negated lows/highs.
+    """
+    positions = np.flatnonzero(~np.isnan(pivots))
+
+    def pullback(a, b):
+        # Distance from the lower of two peaks down to the deepest point between them
+        if b - a < 2:
+            return np.nan
+        return min(pivots[a], pivots[b]) - opposite[a + 1:b].min()
+
+    for k in range(1, len(positions)):
+        bar = positions[k] + lookback
+        if bar >= len(pivots) or np.isnan(atr[bar]):
+            continue
+        tolerance, prominence = tolerance_atr * atr[bar], prominence_atr * atr[bar]
+
+        if k >= 2 and positions[k] - positions[k - 2] <= max_width:
+            p1, p2, p3 = positions[k - 2:k + 1]
+            h1, h2, h3 = pivots[p1], pivots[p2], pivots[p3]
+            deep = pullback(p1, p2) >= prominence and pullback(p2, p3) >= prominence
+            if deep and abs(h1 - h3) <= tolerance and h2 - max(h1, h3) >= prominence:
+                yield bar, 'hs'
+                continue
+            if deep and max(h1, h2, h3) - min(h1, h2, h3) <= tolerance:
+                yield bar, 'triple'
+                continue
+
+        p1, p2 = positions[k - 1], positions[k]
+        if (p2 - p1 <= max_width and abs(pivots[p1] - pivots[p2]) <= tolerance
+                and pullback(p1, p2) >= prominence):
+            yield bar, 'double'
+
+def _flag_breakouts(data, pole_bars=10, flag_bars=5, pole_atr=3.0, max_retrace=0.5):
+    """Bull/Bear flag: strong pole, tight counter-trend consolidation, then a breakout."""
+    flag_high = data['high'].shift(1).rolling(flag_bars).max()
+    flag_low = data['low'].shift(1).rolling(flag_bars).min()
+    pole_end = data['close'].shift(flag_bars + 1)
+    pole = pole_end - data['close'].shift(flag_bars + 1 + pole_bars)
+    pole_atr_ref = data['ATR'].shift(flag_bars + 1)
+    tight = (flag_high - flag_low) <= max_retrace * pole.abs()
+    flag_drift = data['close'].shift(1) - data['close'].shift(flag_bars)
+
+    bull = (tight & (pole >= pole_atr * pole_atr_ref) & (flag_drift <= 0)
+            & (flag_low >= pole_end - max_retrace * pole) & (data['close'] > flag_high))
+    bear = (tight & (-pole >= pole_atr * pole_atr_ref) & (flag_drift >= 0)
+            & (flag_high <= pole_end - max_retrace * pole) & (data['close'] < flag_low))
+    return bull.to_numpy(), bear.to_numpy()
+
+def _cup_and_handle_breakouts(data, cup_bars=30, handle_bars=5, depth_atr=2.0, tolerance_atr=1.0):
+    """Rounded cup with similar rims, a shallow handle, then a close above the rim."""
+    high, low, close, atr = (data[c].to_numpy(dtype=float) for c in ['high', 'low', 'close', 'ATR'])
+    third = cup_bars // 3
+    events = np.zeros(len(data), dtype=bool)
+    for i in range(cup_bars + handle_bars, len(data)):
+        cup_start, cup_end = i - handle_bars - cup_bars, i - handle_bars
+        ref_atr = atr[cup_end - 1]
+        if np.isnan(ref_atr):
+            continue
+        cup_high, cup_low = high[cup_start:cup_end], low[cup_start:cup_end]
+        left_rim, right_rim = cup_high[:third].max(), cup_high[-third:].max()
+        bottom_pos = cup_low.argmin()
+        bottom = cup_low[bottom_pos]
+        rim = max(left_rim, right_rim)
+        if not third <= bottom_pos < cup_bars - third:
+            continue
+        if abs(left_rim - right_rim) > tolerance_atr * ref_atr or min(left_rim, right_rim) - bottom < depth_atr * ref_atr:
+            continue
+        handle_high, handle_low = high[i - handle_bars:i].max(), low[i - handle_bars:i].min()
+        if handle_high > rim or handle_low < (rim + bottom) / 2:
+            continue
+        events[i] = close[i] > rim >= close[i - 1]
+    return events
+
+def _rectangle_starts(data, bars=20, range_atr=4.0, drift_atr=1.0):
+    """First bar of a sideways range that is narrow relative to volatility."""
+    price_range = data['high'].rolling(bars).max() - data['low'].rolling(bars).min()
+    drift = (data['close'] - data['close'].shift(bars - 1)).abs()
+    in_range = (price_range <= range_atr * data['ATR']) & (drift <= drift_atr * data['ATR'])
+    return (in_range & ~in_range.shift(1, fill_value=False)).to_numpy()
+
+def detect_chart_patterns(data, lookback=SWING_LOOKBACK, tolerance_atr=0.5, prominence_atr=1.0, max_width=60):
+    """Detect chart patterns using only information available at each bar.
+
+    Reversal patterns are built from confirmed swing pivots and reported on the bar where
+    their last pivot is confirmed. Tolerances scale with ATR, so they work at any price level.
+    Each bar keeps the first matching pattern in priority order.
+    """
+    patterns = np.full(len(data), 'None', dtype=object)
+
+    def mark(bar, name):
+        if patterns[bar] == 'None':
+            patterns[bar] = name
+
+    high, low, atr = (data[c].to_numpy(dtype=float) for c in ['high', 'low', 'ATR'])
+    tops = {'hs': 'Head and Shoulders', 'triple': 'Triple Top', 'double': 'Double Top'}
+    bottoms = {'hs': 'Inverse Head and Shoulders', 'triple': 'Triple Bottom', 'double': 'Double Bottom'}
+    args = (atr, lookback, tolerance_atr, prominence_atr, max_width)
+    for bar, kind in _peak_formations(data['Swing_High'].to_numpy(dtype=float), low, *args):
+        mark(bar, tops[kind])
+    for bar, kind in _peak_formations(-data['Swing_Low'].to_numpy(dtype=float), -high, *args):
+        mark(bar, bottoms[kind])
+
+    for bar in np.flatnonzero(_cup_and_handle_breakouts(data)):
+        mark(bar, 'Cup and Handle')
+    bull_flags, bear_flags = _flag_breakouts(data)
+    for bar in np.flatnonzero(bull_flags):
+        mark(bar, 'Bull Flag')
+    for bar in np.flatnonzero(bear_flags):
+        mark(bar, 'Bear Flag')
+    for bar in np.flatnonzero(_rectangle_starts(data)):
+        mark(bar, 'Rectangle')
+
+    data['Pattern'] = patterns
     return data
 
 def print_signal_analysis(data):
-    # Filter for meaningful signals
-    significant_signals = data[data['Score'] > 3].copy()
-    
-    if len(significant_signals) == 0:
-        print("No significant trading signals found")
-        return
-        
     print("\n=== Trading Signal Analysis ===")
-    
+
     # Print latest/current signal first
     latest = data.iloc[-1]
     print("\nCURRENT SIGNAL:")
@@ -208,7 +242,13 @@ def print_signal_analysis(data):
     print(f"Close Price: {latest['close']}")
     print(f"Reasoning: {latest['Reasoning']}")
     print("-" * 80)
-    
+
+    # Filter for meaningful signals
+    significant_signals = data[data['Score'] > 3].copy()
+    if len(significant_signals) == 0:
+        print("No significant trading signals found")
+        return
+
     print("\nHISTORICAL BEST SIGNALS:")
     print(f"Total signals analyzed: {len(data)}")
     print(f"Significant signals found: {len(significant_signals)}")
@@ -226,33 +266,6 @@ def print_signal_analysis(data):
         print(f"Reasoning: {row['Reasoning']}")
         print("-" * 80)
 
-
-# Modify evaluate_signals to include the print
-def evaluate_signals(data):
-    scorer = SignalScore()
-    data['Score'] = 0.0
-    data['Confidence'] = 0.0
-    data['Decision'] = 'Neutral'
-    data['Reasoning'] = ''
-    
-    for i in range(1, len(data)):
-        score, confidence, reasons = scorer.calculate_score(data, data, i)
-        
-        data.loc[i, 'Score'] = score
-        data.loc[i, 'Confidence'] = confidence
-        
-        if score > 10 and confidence > 60:
-            data.loc[i, 'Decision'] = 'Strong Long'
-        elif score > 7 and confidence > 40:
-            data.loc[i, 'Decision'] = 'Long'
-        elif score < 3:
-            data.loc[i, 'Decision'] = 'Neutral'
-            
-        data.loc[i, 'Reasoning'] = ' | '.join(reasons)
-    
-    # Print analysis after processing
-    print_signal_analysis(data)
-    return data
 
 def plot_trend(data):
     if data.empty:
