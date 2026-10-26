@@ -1,11 +1,14 @@
 import argparse
 import sys
 import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from . import __version__
+from .alerts import (broadcast, format_digest, fresh_signals, history_start, load_state, notifiers_from_env,
+                     save_state, seconds_until_next_close, utc_now)
 from .analysis import run_analysis
 from .backtest import BacktestConfig, run_backtest
 from .dashboard import write_dashboard
@@ -96,6 +99,21 @@ def build_parser():
     scan.add_argument('--output-dir', type=Path, default=Path('output'),
                       help='directory for scan.csv and the dashboard (default: %(default)s)')
     scan.add_argument('--html', action='store_true', help='write a dashboard (index.html) and a report per market')
+    scan.add_argument('--alert', action='store_true',
+                      help='send a digest of the markets signalling on their last candle (see "watch" for channels)')
+    scan.add_argument('--dashboard-url', help='link added to alerts, e.g. where the dashboard is published')
+
+    watch = commands.add_parser(
+        'watch', parents=[_strategy_options(), _backtest_options()], help='alert on new signals as candles close',
+        description='Check the markets every time a candle closes and alert on new entry signals. Alerts go to the '
+                    'console and to Telegram (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID) and/or Discord '
+                    '(DISCORD_WEBHOOK_URL) when those environment variables or .env entries are set.')
+    watch.add_argument('--symbols', default='BTCUSDT,ETHUSDT', help='comma-separated pairs (default: %(default)s)')
+    watch.add_argument('--interval', default='4h', choices=INTERVALS, help='candle interval (default: %(default)s)')
+    watch.add_argument('--tld', default='com', help="Binance domain, use 'us' for Binance.US (default: %(default)s)")
+    watch.add_argument('--once', action='store_true', help='check once and exit, e.g. from cron')
+    watch.add_argument('--state-file', type=Path, default=Path('output/watch_state.json'),
+                       help='remembers alerted candles to avoid duplicates (default: %(default)s)')
 
     optimize = commands.add_parser(
         'optimize', parents=shared, help='walk-forward parameter optimisation',
@@ -215,7 +233,47 @@ def run_scan(args):
         index = write_dashboard(args.output_dir, summary, details, config, args.interval, args.simulations,
                                 subtitle=subtitle, errors=errors)
         print(f'Saved dashboard to {index}')
+    if args.alert:
+        messages = fresh_signals({symbol: data for symbol, (data, _) in details.items()}, args.interval, config)
+        if messages:
+            _send(notifiers_from_env(), format_digest(messages, args.interval, args.dashboard_url))
+        else:
+            print('No markets signalled on their last candle; no alert sent.')
     return 0 if details else 1
+
+
+def _send(notifiers, text):
+    for failure in broadcast(notifiers, text):
+        print(f'Alert delivery failed - {failure}', file=sys.stderr)
+
+
+def run_watch(args):
+    symbols = [symbol.strip().upper() for symbol in args.symbols.split(',') if symbol.strip()]
+    notifiers = notifiers_from_env()
+    state = load_state(args.state_file)
+    client = create_client(args.tld)
+    config = backtest_config(args)
+    print(f'Watching {", ".join(symbols)} on {args.interval} candles, alerts via '
+          f'{", ".join(n.name for n in notifiers)}')
+    while True:
+        markets = {}
+        for symbol in symbols:
+            try:
+                data = fetch_klines(symbol, args.interval, history_start(args.interval), client=client)
+                markets[symbol] = run_analysis(data, lookback=args.swing_lookback, adx_threshold=args.adx_threshold)
+            except Exception as error:
+                print(f'Could not check {symbol}: {error}', file=sys.stderr)
+        messages = fresh_signals(markets, args.interval, config, state)
+        for message in messages:
+            _send(notifiers, message)
+        save_state(args.state_file, state)
+        if not messages:
+            print(f'{utc_now():%Y-%m-%d %H:%M} UTC: no new signals')
+        if args.once or not markets:
+            return 0 if markets else 1
+        wait = seconds_until_next_close(max(data['timestamp'].iloc[-1] for data in markets.values()), args.interval)
+        print(f'Next check in {wait / 60:.0f} minutes')
+        time.sleep(wait)
 
 
 def run_optimize(args):
@@ -249,7 +307,7 @@ def run_optimize(args):
     return 0
 
 
-HANDLERS = {'analyze': run_analyze, 'scan': run_scan, 'optimize': run_optimize}
+HANDLERS = {'analyze': run_analyze, 'scan': run_scan, 'optimize': run_optimize, 'watch': run_watch}
 
 
 def main(argv=None):

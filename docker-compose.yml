@@ -5,3 +5,17 @@ services:
     volumes:
       - ./output:/app/output
     command: ["--symbol", "APEUSDT", "--interval", "1d"]
+
+  # 24/7 signal alerts: docker compose --profile alerts up -d watch
+  watch:
+    build: .
+    container_name: trading_watch
+    profiles: ["alerts"]
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - ./output:/app/output
+    command: ["watch", "--symbols", "BTCUSDT,ETHUSDT,SOLUSDT", "--interval", "4h"]
